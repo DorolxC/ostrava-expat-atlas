@@ -1,0 +1,6 @@
+dist/
+osm-candidates.json
+node_modules/
+.vercel/
+.env
+.env.*

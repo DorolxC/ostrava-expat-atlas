@@ -1,0 +1,27 @@
+{
+  "name": "ostrava-expat-atlas",
+  "version": "5.3.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/serve.mjs dist",
+    "map:ingest": "node scripts/ingest.mjs",
+    "map:ingest-city": "node scripts/refresh-geography.mjs",
+    "map:details": "node scripts/compile-detail.mjs",
+    "map:motion": "node scripts/build-motion.mjs",
+    "map:flow": "node scripts/build-flow.mjs",
+    "map:routes": "node scripts/build-world.mjs",
+    "map:world": "node scripts/render.mjs --world-depth",
+    "map:canopies": "node scripts/render.mjs --canopies",
+    "map:render": "node scripts/render.mjs && node scripts/render.mjs --world-depth",
+    "map:pilots": "node scripts/render.mjs --pilots && node scripts/render.mjs --world-depth",
+    "check": "node scripts/check.mjs && node scripts/geometry-audit.mjs && node scripts/check-world.mjs && npm run check:roofs",
+    "check:world": "node scripts/check-world.mjs",
+    "check:roofs": "node --test scripts/roof-shapes.test.mjs scripts/roof-fixtures.test.mjs",
+    "check:geometry": "node scripts/geometry-audit.mjs"
+  }
+}
+

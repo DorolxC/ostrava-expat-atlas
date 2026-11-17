@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/mark.png">
+<title>Ostrava developer geometry review</title>
+<style>
+  body { margin: 0; color: #f5f2df; background: #202c27; font: 14px system-ui,sans-serif; }
+  header { display: flex; align-items: baseline; flex-wrap: wrap; padding: 10px 16px; gap: 6px 20px; }
+  h1 { font-size: 15px; margin: 0; }
+  fieldset { display: flex; flex-wrap: wrap; gap: 7px 14px; border: 0; padding: 0; margin: 0; }
+  label { display: inline-flex; align-items: center; padding-bottom: 2px; border-bottom: 2px solid var(--line, transparent); }
+  input, select { accent-color: #e7c78d; }
+  select, button { font: inherit; }
+  #status { margin-left: auto; }
+  main { position: relative; height: 100%; overflow: hidden; }
+  iframe, canvas { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  canvas { pointer-events: none; }
+  #readout { position: absolute; right: 10px; top: 10px; max-width: min(380px, 79vw); padding: 8px 12px; white-space: pre-wrap; pointer-events: none; background: #212824eb; }
+  #readout:empty { display: none; }
+  body { display: grid; grid-template-rows: auto 1fr; height: 100dvh; }
+</style>
+<header>
+  <h1>Ostrava geometry review</h1>
+  <fieldset aria-label="Geometry overlays">
+    <label style="--line:#ee8c4d"><input id="compiled" type="checkbox" checked> Compiled</label>
+    <label style="--line:#fff"><input id="source" type="checkbox" disabled> Raw OSM</label>
+    <label style="--line:#242a31"><input id="paint" type="checkbox"> Road surface widths</label>
+    <label style="--line:#fffa91"><input id="nodes" type="checkbox"> Endpoints and junctions</label>
+    <label style="--line:#b1ff88"><input id="structures" type="checkbox" checked> Bridges and tunnels</label>
+    <label style="--line:#80ebdf"><input id="seams" type="checkbox"> Tile edges</label>
+    <label style="--line:#ff3e9f"><input id="flags" type="checkbox"> Gaps to review</label>
+  </fieldset>
+  <select id="sites" aria-label="Jump to audit location"><option value="">Audit locations</option></select>
+  <span id="status" role="status">Loading source and tiles…</span>
+</header>
+<main>
+  <iframe title="Ostrava map under review"></iframe>
+  <canvas aria-hidden="true"></canvas>
+  <output id="readout"></output>
+</main>
+<script type="module" src="/_geometry.js"></script>

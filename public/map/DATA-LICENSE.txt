@@ -1,0 +1,31 @@
+Geographic geometry and municipal outline
+© OpenStreetMap contributors. Open Database License (ODbL) 1.0.
+https://www.openstreetmap.org/copyright
+https://opendatacommons.org/licenses/odbl/1-0/
+
+Source snapshot: BBBike Ostrava OpenStreetMap extract, 7 November 2026.
+https://download.bbbike.org/osm/bbbike/Ostrava/
+Municipal outline: OSM relation 437354, retrieved 15 November 2026.
+https://www.openstreetmap.org/relation/437354
+
+The derivatives include geometry.json, boundary.json and river-flow.json. The raster tiles are
+produced works based on the geography. Landmark anchor references are
+listed in landmarks.json. Some architectural details are illustrative.
+
+City district names and geometries
+Statutární město Ostrava, CC BY 4.0.
+https://creativecommons.org/licenses/by/4.0/
+https://mapy.ostrava.cz/opendata/data/opendata/obvody_WGS84_gjson.zip
+Label points were calculated within the published district polygons.
+
+Terrain shading
+Mapzen Terrain Tiles, obtained 15 November 2026.
+https://registry.opendata.aws/terrain-tiles/
+https://github.com/tilezen/joerd/blob/master/docs/attribution.md
+Europe terrain data produced using Copernicus data and information funded by
+the European Union - EU-DEM layers.
+Global SRTM and GMTED2010 terrain data courtesy of the U.S. Geological Survey.
+
+The motion and street-detail datasets derive from OpenStreetMap. Tram styling
+was informed by the Ostrava transit operator's visitor guide.
+https://www.dpo.cz/travel/index-en.html

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="An interactive illustrated map of Ostrava and an English-language guide to places around the city.">
+  <meta name="theme-color" content="#142b39">
+  <link rel="icon" href="mark.png">
+  <link rel="preload" href="map/overview.png" as="fetch" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="atlas.css">
+  <link rel="stylesheet" href="edition.css">
+  <title>Ostrava Expat Atlas</title>
+</head>
+<body>
+  <main id="map" class="atlas" aria-label="Isometric map of Ostrava">
+    <canvas id="map-art" aria-hidden="true"></canvas>
+    <div id="map-input" tabindex="0" role="region" aria-label="Map viewport. Arrow keys pan, plus and minus zoom, zero returns to the centre."></div>
+    <div id="map-labels" aria-hidden="true"></div>
+    <div id="markers" aria-label="Places on the map"></div>
+
+    <header class="imprint">
+      <button class="brand" id="brand" type="button" aria-label="Ostrava Expat Atlas, return to the centre">
+        <span class="brand-main">Ostrava</span>
+        <span class="brand-caption">Expat<br>Atlas</span>
+      </button>
+      <button id="explore" class="explore-button" type="button" aria-expanded="false" aria-controls="explore-panel" aria-keyshortcuts="/">
+        <span data-icon="search" aria-hidden="true"></span> Find a place <span class="filter-active" id="active-count" hidden></span>
+        <kbd aria-hidden="true">/</kbd>
+      </button>
+    </header>
+
+    <section id="explore-panel" class="paper discovery disclose" data-open="false" inert aria-labelledby="explore-title">
+      <div class="panel-heading">
+        <h1 id="explore-title">Find a place</h1>
+        <button id="close-explore" class="icon-button" type="button" aria-label="Close exploration" data-icon="x"></button>
+      </div>
+      <nav class="index-tabs" aria-label="Explore by">
+        <button id="place-tab" type="button" aria-pressed="true" aria-controls="place-section">Places</button>
+        <button id="district-tab" type="button" aria-pressed="false" aria-controls="district-section">Districts</button>
+      </nav>
+      <div id="place-section" class="panel-section">
+        <div class="search-bar">
+          <span data-icon="search" aria-hidden="true"></span>
+          <label class="sr-only" for="query">Search places, categories and tags</label>
+          <input id="query" type="search" role="combobox" autocomplete="off" spellcheck="false"
+            aria-autocomplete="list" aria-controls="results" aria-expanded="false" placeholder="Search places…">
+          <button id="clear-query" class="icon-button" type="button" aria-label="Clear search" data-icon="x" hidden></button>
+        </div>
+        <div class="discovery-actions">
+          <button id="english-quick" class="facet-button" type="button" aria-pressed="false"><span data-icon="check" aria-hidden="true"></span> English confirmed</button>
+          <button id="filter-button" class="facet-button" type="button" aria-expanded="false" aria-controls="filters"><span data-icon="filter" aria-hidden="true"></span> Filters <span id="filter-count" hidden></span></button>
+        </div>
+        <form class="filter-panel" id="filters" data-open="false" inert>
+          <div class="filter-content">
+            <div class="filter-fields">
+              <label>Category <select id="category" name="category"><option value="">All categories</option></select></label>
+              <label>English support
+                <select id="english" name="english">
+                  <option value="">Any status</option><option value="confirmed">English confirmed</option>
+                  <option value="reported">Community reported</option><option value="unverified">Not verified</option>
+                </select>
+              </label>
+            </div>
+            <details id="tag-filters"><summary>Tags</summary><div id="tag-options" class="tag-options"></div></details>
+            <div class="filter-actions"><button id="reset-filters" class="text-button" type="button">Reset filters</button>
+              <button id="filter-done" class="ink-button" type="button">Show places</button></div>
+          </div>
+        </form>
+        <div id="result-count" class="list-caption" aria-live="polite"></div>
+        <div id="results" class="place-list" role="listbox" aria-label="Places"></div>
+      </div>
+      <div id="district-section" class="panel-section" hidden>
+        <nav class="index-editions" aria-label="Illustrated views">
+          <a href="?view=18.291360,49.836250,1.800" data-viewpoint>Historic centre</a>
+          <a href="?view=18.277565,49.818990,2.680" data-viewpoint>Ironworks</a>
+        </nav>
+        <button id="city-overview" class="list-control whole-button" type="button"><span data-icon="landmark" aria-hidden="true"></span> Whole Ostrava <span data-icon="arrow" aria-hidden="true"></span></button>
+        <div id="district-list" class="district-list" aria-label="Districts"></div>
+      </div>
+    </section>
+
+    <article id="details" class="paper place-sheet disclose" data-open="false" inert aria-labelledby="place-title"></article>
+
+    <section id="overview-panel" class="paper index-panel disclose" data-open="false" inert aria-labelledby="overview-title">
+      <div class="panel-heading">
+        <h2 id="overview-title">Map overview</h2>
+        <button id="close-overview" class="icon-button" type="button" aria-label="Close map overview" data-icon="x"></button>
+      </div>
+      <button id="inset-picture" class="inset-picture" type="button" aria-label="Navigate with the overview map">
+        <img alt=""><span id="inset-viewport" aria-hidden="true"></span>
+      </button>
+      <button id="inset-whole" type="button" class="list-control">Whole Ostrava <span data-icon="arrow" aria-hidden="true"></span></button>
+      <button id="motion-toggle" type="button" class="list-control" aria-pressed="false">
+        <span>Ambient motion <small id="motion-note"></small></span><span class="switch" aria-hidden="true"></span>
+      </button>
+      <button id="share-map" type="button" class="list-control">Share this view <span data-icon="share" aria-hidden="true"></span></button>
+      <div id="coordinates" class="overview-coordinate" aria-hidden="true"></div>
+    </section>
+
+    <div id="map-message" class="map-message" role="status">Loading the atlas…</div>
+    <footer class="imprint-footer">
+      <span class="credits"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
+        <a href="https://data.gov.cz/zdroj/datové-sady/00845451/6333fdcab1c60bb548e62809d84bef5f" target="_blank" rel="noopener">City of Ostrava</a>
+        <button id="about-button" type="button" aria-label="About the map" data-icon="info"></button></span>
+      <div class="map-reading" aria-hidden="true">
+        <div class="scale"><span id="scale-label"></span><span id="scale-line"></span></div>
+      </div>
+      <aside class="map-tools" aria-label="Map tools">
+        <button id="reset-view" class="compass" type="button" title="Return to the centre (0)" aria-label="Return to the centre">
+          <span aria-hidden="true">N</span><span id="compass-arrow" data-icon="north" aria-hidden="true"></span>
+        </button>
+        <div class="zoom-controls" aria-label="Zoom">
+          <button id="zoom-out" class="icon-button" type="button" aria-label="Zoom out" data-icon="minus"></button>
+          <button id="zoom-in" class="icon-button" type="button" aria-label="Zoom in" data-icon="plus"></button>
+        </div>
+        <button id="overview-toggle" class="icon-button map-index-button" type="button" aria-label="Map overview" title="Map overview" aria-expanded="false" aria-controls="overview-panel" data-icon="layers"></button>
+      </aside>
+    </footer>
+  </main>
+
+  <dialog class="paper modal" id="about">
+    <div class="panel-heading"><h2>About the atlas</h2><form method="dialog"><button class="icon-button" type="submit" aria-label="Close" data-icon="x"></button></form></div>
+    <p>The atlas covers all 23 Ostrava districts. Building footprints, streets, and water use mapped geography. Some heights, façades, roof details and movement are illustrated.</p>
+    <p><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> under ODbL. <a href="map/geometry.json" download>Source geometry</a></p>
+    <p>District names and boundaries by <a href="https://data.gov.cz/zdroj/datové-sady/00845451/6333fdcab1c60bb548e62809d84bef5f" target="_blank" rel="noopener">Statutární město Ostrava</a> under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.</p>
+    <p>Relief uses <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Mapzen Terrain Tiles</a> and Copernicus EU-DEM. <a href="map/DATA-LICENSE.txt">Full data credits</a></p>
+    <h3>English support</h3>
+    <dl><dt>English confirmed</dt><dd>A source confirms a specific service.</dd><dt>Community reported</dt><dd>A community report describes English service.</dd><dt>Not verified</dt><dd>English-language availability is unverified.</dd></dl>
+  </dialog>
+  <dialog class="paper modal" id="share-dialog">
+    <div class="panel-heading"><h2>Share a link</h2><form method="dialog"><button class="icon-button" type="submit" aria-label="Close" data-icon="x"></button></form></div>
+    <label for="share-url">Atlas URL</label><input id="share-url" type="url" readonly>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

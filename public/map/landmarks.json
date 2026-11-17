@@ -1,0 +1,125 @@
+{
+  "structures": [
+    {
+      "model": "bolt",
+      "level": "A",
+      "name": "Bolt Tower and blast furnace no. 1",
+      "point": [18.2766763, 49.8193909],
+      "osm": "node/2495938893",
+      "geometry": { "glass": "w481631666", "galleries": ["w481631674", "w481631675", "w481631676", "w481631677"] },
+      "dimensions": { "height": 77.7 },
+      "reference": "https://apatelier.cz/en/projects/Extension-of-Blast-Furnace-No-1",
+      "sources": ["https://www.dolnivitkovice.cz/wp-content/uploads/2020/01/ti-dov-bolt_tower.pdf"],
+      "drawing": "Mapped drum, open spiral galleries and blast-furnace structure. Steel, glass and stair edges are interpreted from the architect's photographs."
+    },
+    {
+      "model": "furnace",
+      "number": 4,
+      "point": [18.2791953, 49.8197565],
+      "osm": "node/5101615071",
+      "reference": "https://www.apatelier.cz/en/projects/3e8056f3607b4454b88f7d9379ee13a3"
+    },
+    {
+      "model": "furnace",
+      "number": 6,
+      "point": [18.2805374, 49.8200538],
+      "osm": "node/5101615072",
+      "reference": "https://www.apatelier.cz/en/projects/3e8056f3607b4454b88f7d9379ee13a3"
+    },
+    {
+      "model": "gong",
+      "level": "A",
+      "name": "Gong",
+      "point": [18.2795736, 49.8191004],
+      "osm": "way/78540797",
+      "geometry": { "shell": "w78540797", "crown": "w506257124" },
+      "dimensions": { "diameter": 71 },
+      "reference": "https://www.apatelier.cz/en/projects/conversion-gasholder-gong-placed-national-cultural",
+      "sources": ["https://www.dolnivitkovice.cz/wp-content/uploads/2020/01/Metodika-kronika-projektu-NKP-Vitkovice.pdf"],
+      "drawing": "Riveted circular vessel, pale upper screen and exposed cross-braced steelwork. The roof and base follow the mapped outer and upper outlines."
+    },
+    {
+      "model": "town-hall",
+      "level": "A",
+      "name": "New City Hall",
+      "point": [18.2916338, 49.841657],
+      "osm": "way/462065474",
+      "geometry": { "wings": "r6827528", "plinth": "w462065472", "shaft": "w462065474", "terrace": "w462065473", "crown": "w462065476", "mast": "w462065477" },
+      "replaces": { "buildings": ["r6827528", "w462065472"] },
+      "dimensions": { "height": 85.6, "terrace": 73 },
+      "reference": "https://ostrava.cz/cs/o-meste/aktualne/nova-radnice-slavi-90-let",
+      "sources": ["https://www.ostrava.cz/cs/o-meste/aktualne/jen-jednou-za-zhruba-pul-stoleti-v-ostrave-probiha-repase-rucicek-veznich-hodin-nove-radnice", "https://www.ostrava.cz/cs/o-meste/prezentace/znak-mesta/ostrava-z-ptaci-perspektivy"],
+      "drawing": "Mapped courtyard openings, copper-clad shaft, clock dials and observation terrace. Wing window and roof panel rhythms are illustrative."
+    },
+    {
+      "model": "old-hall",
+      "level": "A",
+      "name": "Old Town Hall",
+      "point": [18.2930206, 49.8351933],
+      "osm": "way/47987365",
+      "geometry": { "body": "w47987365" },
+      "replaces": { "buildings": ["w47987365"] },
+      "dimensions": { "height": 36.5 },
+      "reference": "https://www.ostrmuz.cz/website/mainmenu/muzeum/zvonkohra/",
+      "sources": ["https://encyklopedie.ostrava.cz/home-mmo/?acc=profil-domu&load=87"],
+      "drawing": "Mapped footprint, historic mansard roof and dormers, copper onion cap and clock. The tower sits on the established atlas anchor."
+    },
+    {
+      "model": "masaryk-square",
+      "level": "A",
+      "name": "Masaryk Square",
+      "point": [18.29247, 49.83542],
+      "osm": "relation/375168",
+      "geometry": { "fountain": "n295418231" },
+      "replaces": { "details": ["n295418231"] },
+      "fixtures": {
+        "marian": { "osm": "way/271154990", "point": [18.2928412, 49.8355583] },
+        "florian": { "osm": "node/2764345861", "point": [18.2929299, 49.8357103] },
+        "masaryk": { "osm": "node/2841970205", "point": [18.2929204, 49.8351484] }
+      },
+      "dimensions": { "jets": 5, "jetHeight": 2.5 },
+      "reference": "https://ostrava.cz/cs/o-meste/prezentace/tiskoviny/rok-2007/cerven-2007",
+      "sources": ["https://encyklopedie.ostrava.cz/home-mmo/?acc=profil_objektu&load=49", "https://pamatkovykatalog.cz/socha-sv-floriana-13230105", "https://moap.ostrava.cz/cs/o-moapu/zajimavosti/copy_of_zajimavosti-mestskeho-obvodu-moravska-ostrava-a-privoz"],
+      "drawing": "Five ground-level jets within the mapped fountain area and three monuments registered to the bundled OpenStreetMap PBF. Jet spacing and statuary silhouettes are illustrative."
+    },
+    {
+      "model": "cathedral",
+      "level": "A",
+      "name": "Cathedral of the Divine Saviour",
+      "point": [18.288957, 49.835777],
+      "osm": "way/47358795",
+      "geometry": { "aisles": "w47358795", "nave": "w462065479", "towers": ["w462065478", "w462065480"] },
+      "replaces": { "buildings": ["w47358795", "w462065479"] },
+      "reference": "https://amo.ostrava.cz/vystavy-2/vystavy/vystava-sakralni-architektura-ostravy/katedrala-bozskeho-spasitele/",
+      "sources": ["https://www.npu.cz/cs/opravujete-pamatku/inspirujte-se/11959-obnova-a-zpristupneni-katedraly-bozskeho-spasitele-v-moravske-ostrave"],
+      "drawing": "Three-aisled basilica, curved apses, clock faces, terracotta pilasters and patinated twin spires. The mapped tower-height envelope is approximately 68 metres. The city archive lists 64 metres."
+    },
+    {
+      "model": "oblouk",
+      "level": "A",
+      "name": "Poruba’s Oblouk",
+      "point": [18.1734465, 49.8228681],
+      "osm": "way/38935068",
+      "geometry": {
+        "wings": ["w38935068", "w33679723"], "passage": "w38935073", "sidePassages": ["w394751704", "w394751727"],
+        "riverWings": ["w38935064", "w38935067"], "riverPassage": "w31744114", "riverSidePassages": ["w394751712", "w394751729"]
+      },
+      "replaces": { "buildings": ["w38935068", "w33679723", "w38935064", "w38935067"] },
+      "reference": "https://poruba.ostrava.cz/cs/o-porube/zajimavosti/prochazky-porubou/architektura-socialistickeho-realismu-v-porube",
+      "sources": ["https://poruba.ostrava.cz/cs/o-porube/aktuality/zacina-rekonstrukce-oblouku", "https://poruba.ostrava.cz/cs/o-porube/media-a-zpravodajstvi/prio-radnicni-zpravodaj/rok-2022/rok-2022/PRIO_01_2022.pdf"],
+      "drawing": "Porubská and nábřeží SPB gateways, their side walkways, terracotta relief and renovated tile roofs. Tunnel entrances follow the mapped passage centerlines. Decorative motifs and vertical proportions are illustrative."
+    },
+    {
+      "model": "sykora-bridge",
+      "level": "A",
+      "name": "Miloš Sýkora Bridge",
+      "point": [18.2963319, 49.8374832],
+      "osm": "way/388529457",
+      "geometry": { "road": ["w388529457", "w172643473"], "walkways": ["w118236098", "w118236118"] },
+      "dimensions": { "span": 60.7, "archRise": 7, "deckWidth": 16 },
+      "reference": "https://osvobozeni.ostrava.cz/2025/05/07/cyklojizda-ostravou-za-osvobozenim-zastaveni-treti/",
+      "sources": ["https://encyklopedie.ostrava.cz/home-mmo/?acc=profil-domu&load=110", "https://www.visitostrava.eu/cz/objevuj-ostravu/neznama-ostrava/879-pripad-sykora-pravda-nebo-fikce.html"],
+      "drawing": "Twin riveted arch trusses and outside footway railings. The superstructure is fitted to the existing grade-one roadway and footway geometry."
+    }
+  ]
+}
