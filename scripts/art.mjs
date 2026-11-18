@@ -397,8 +397,8 @@ export function paintSection({ scale, ox, oy, width, height, layers, landmarks, 
       map.polygon(contact,(x,y)=>{ shadowMask[y*width+x]=152; });
     }
     for (const step of offsets) {
-      const strength=palette ? Math.round((miniature==='daylight' ? 127 : style==='foundry'||miniature==='lithograph' ? 146 : 134)-
-        (miniature==='daylight' ? 72 : 54)*step) :
+      const strength=palette ? Math.round((palette.light?.strength??(miniature==='daylight' ? 127 : style==='foundry'||miniature==='lithograph' ? 146 : 134))-
+        (palette.light?.falloff??(miniature==='daylight' ? 72 : 54))*step) :
         pilot ? Math.round(123-45*step) : Math.round(101-36*step);
       map.polygon(rings.map((r)=>r.map(([x,y])=>[x+offsetX*step,y+offsetY*step])),(x,y)=>{
         const at=y*width+x;
@@ -406,8 +406,8 @@ export function paintSection({ scale, ox, oy, width, height, layers, landmarks, 
       });
     }
   }
-  for (const f of buildings) shadow(f.rings, f.design.total * scale,f.design.minimum);
-  const softness=Math.max(1,Math.round((miniature==='daylight' ? .88 : palette ? .57 : .75)*scale));
+  for (const f of buildings) shadow(f.rings, f.design.total*scale*(palette?.light?.cast??1),f.design.minimum);
+  const softness=Math.max(1,Math.round((palette?.light?.softness??(miniature==='daylight' ? .88 : palette ? .57 : .75))*scale));
   const shadowTone=palette?.shadow ?? (pilot==='ironworks' ? 0x30383b : pilot==='centre' ? 0x3a4350 : 0x405052);
   for (let y=softness;y<height-softness;y++) {
     const row=y*width;
@@ -866,7 +866,8 @@ export function paintSection({ scale, ox, oy, width, height, layers, landmarks, 
     const swatch=palette ? palette.summerLeaf : noise(salt,34)>0.86 ? 0xbeb371 : 0xb7c184;
     const top = y-radius*(conifer ? 1.95 : 1.45);
     let foliage = 0;
-    map.ellipse(x+radius*0.76,y+0.8*scale,radius*1.27,radius*0.55,(x,y) => {
+    const cast=palette?.light?.cast??1;
+    map.ellipse(x+radius*0.76*cast,y+0.8*scale,radius*1.27*cast,radius*0.55,(x,y) => {
       const at = y * width + x;
       if (map.depth[at]<0) map.pixel(x,y,mix(map.pixels[at],palette?.foliageShadow ?? 0x435745,palette ? .38 : .33),0);
     });

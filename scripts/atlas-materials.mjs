@@ -44,6 +44,24 @@ mapStyles.lithograph = {
   shadow:0x443d54, sunlight:0xe6cfa7, plasterShade:0x6f6777,
   litGlass:0x7c9294, shadeGlass:0x617586, window:0x423e53,
 };
+mapStyles.afternoon = {
+  ...mapStyles.daylight,
+  ground:0xb7b890, urbanGround:0xc3b7a2, housing:0xbdbb90,
+  grass:0xa7ba7f, park:0x99b375, wood:0x76945f, field:0xc8ad76,
+  works:0x9d9082, earth:0xc1a786, paving:0xe1d1b4, plaza:0xf0dbb6,
+  shadow:0x494962, foliageShadow:0x3d5348, sunlight:0xffdb98, plasterShade:0x726371,
+  litGlass:0x769793, shadeGlass:0x5b7286, window:0x414c56, summerLeaf:0xd0bf76,
+  light:{cast:1.30,softness:1.18,strength:141,falloff:83,wallSun:.26,wallShade:.38,roofSun:.0068,weathered:true},
+};
+mapStyles.overcast = {
+  ...mapStyles.daylight,
+  ground:0xa8b292, urbanGround:0xb7b6ac, housing:0xaeb79c,
+  grass:0x99ac80, park:0x8ca77e, wood:0x67886d, field:0xb7a885,
+  works:0x8d9189, earth:0xada18d, paving:0xd5d1c3, plaza:0xe2d7c6,
+  shadow:0x435669, foliageShadow:0x3d5752, sunlight:0xe6e9de, plasterShade:0x647786,
+  litGlass:0x819c9e, shadeGlass:0x697f8c, window:0x445764, summerLeaf:0xb9c28a,
+  light:{cast:.88,softness:1.75,strength:102,falloff:60,wallSun:.23,wallShade:.26,roofSun:.0048},
+};
 
 // Roof and façade pairs by architectural family. Deterministic seed selection
 // gives neighboring houses variety while keeping the district character intact.
@@ -269,6 +287,13 @@ export function atlasBuilding(style,family,tags,salt,{small,civic,architecture,p
   } else if (!industrial && (legacy || family==='houses')) {
     wall=mix(wall,0xf5d5a8,.15);
   }
+  if (style==='afternoon') {
+    if (kind==='clay') roof=mix(roof,industrial?0x944d3b:0xaf5638,.20);
+    if (industrial && kind==='steel') roof=mix(roof,0x556975,.24);
+    if (family==='poruba') wall=mix(wall,0xf0cc9b,.22);
+    if (family==='secession' || family==='town') wall=mix(wall,0xf3d0a6,.12);
+    if (family==='estate' || family==='modern') wall=mix(wall,0xc9d0c8,.18);
+  }
   const trim=brick ? 0xcfab89 : architecture ? (legacy ? 0xf5dfb7 : 0xd9d6c2) :
     legacy ? 0xf2dbaf : 0xd5d1b7;
   return {roof,wall,kind,brick,salt,working:industrial,legacy,trim};
@@ -418,8 +443,9 @@ export function pavingSurface(palette,area,ox,oy,scale) {
 
 export function litWall(palette,base,lit,working) {
   if (palette.technique==='daylight') {
-    return lit ? mix(base,palette.sunlight,working ? .19 : .21) :
-      mix(base,palette.plasterShade,working ? .42 : .34);
+    const sun=palette.light?.wallSun??.21, shade=palette.light?.wallShade??.34;
+    return lit ? mix(base,palette.sunlight,working ? sun-.02 : sun) :
+      mix(base,palette.plasterShade,working ? shade+.08 : shade);
   }
   if (palette.technique==='lithograph') {
     return lit ? mix(base,palette.sunlight,.14) : mix(base,palette.plasterShade,.47);
@@ -432,7 +458,7 @@ export function litWall(palette,base,lit,working) {
 export function roofLight(palette,pigment,amount) {
   if (palette.technique==='daylight') {
     const tone=shade(pigment,Math.round(amount*1.22));
-    return amount>=0 ? mix(tone,palette.sunlight,amount*.0056) : mix(tone,palette.shadow,-amount*.005);
+    return amount>=0 ? mix(tone,palette.sunlight,amount*(palette.light?.roofSun??.0056)) : mix(tone,palette.shadow,-amount*.005);
   }
   if (palette.technique==='lithograph') {
     const grade=amount>9 ? 20 : amount< -9 ? -19 : 0;

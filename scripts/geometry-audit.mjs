@@ -203,7 +203,7 @@ export async function runGeometryCheck(pbf) {
   const covered=byId.get('w39516671');
   assert(covered.tags.covered==='yes' && covered.tags.highway==='cycleway' &&
     same(covered.path.at(-1),[18.2197208,49.8009569]),'Mapped covered cycleway fixture changed');
-  const atlasStyles=['atlas','foundry','daylight','lithograph'];
+  const atlasStyles=['atlas','foundry','daylight','lithograph','afternoon','overcast'];
   for (const style of atlasStyles) assert.deepEqual(transportState(covered.kind,covered.tags,style),{ grade:0,visible:true });
   if (atlasStyles.includes(manifest.artStyle)) assert(covered.visible && covered.grade===0,'Covered cycleway is missing from the surface diagnostic');
   const coveredStream=byId.get('w218227213');

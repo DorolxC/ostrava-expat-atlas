@@ -133,6 +133,9 @@ export function miniatureWall({ design, palette, lit, wall, trim, dark, length, 
   const reflection=mix(glass,trimLight,.32);
   const backing=mix(wall,dark,.39);
   const fascia=mix(wall,trim,.67);
+  const weathered=detail && palette.light?.weathered;
+  const corniceCut=weathered && main && ['poruba','townhouse','secession','civic'].includes(type);
+  const plaster=weathered && ['poruba','townhouse','secession','plaster','colony','row','detached','panel'].includes(type);
   const shopColor=[0x617e72,0xa2644c,0x6a7c8c,0x977455][Math.floor(noise(salt,246)*4)];
   const panelAccent=[0x8ea097,0xc6a375,0xb38e84,0x929cac][Math.floor(noise(salt,247)*4)];
   const doorTone=lit ? mix(shopColor,ink,.44) : mix(shopColor,ink,.65);
@@ -166,6 +169,7 @@ export function miniatureWall({ design, palette, lit, wall, trim, dark, length, 
       elevation>plinth*.72 ? fascia : backing;
     if (ledge<cornice) {
       if (ledge<cornice*.35) return trimLight;
+      if (corniceCut && ledge>cornice*.53 && ledge<cornice*.81 && ax>.29 && ax<.42) return fascia;
       if (ledge<cornice*.63) return fascia;
       return plinthShadow;
     }
@@ -328,6 +332,11 @@ export function miniatureWall({ design, palette, lit, wall, trim, dark, length, 
     }
     if (detail && storey===0 && v<.33 && (type==='poruba'||type==='townhouse'||type==='secession')) {
       return elevation%.68<.095 ? backing : wall;
+    }
+    if (plaster) {
+      const age=noise(Math.floor(u*metres/1.34),Math.floor(elevation/1.02),salt+593);
+      const wear=storey===0 && v<.42 ? -3 : 0;
+      return shade(wall,Math.round((age-.5)*(type==='panel'?8:12))+wear);
     }
     return wall;
   };

@@ -62,7 +62,8 @@ export function modelLandmarks({ map, scale, features, landmarks, screen, boxRin
   const detailed = scale >= 1.5;
   const curated = curatedLandmarkStyles.has(style);
   const atlas = curated || style === 'atlas' || style === 'foundry';
-  const industrialInk = atlas ? ironworksPalettes[style === 'lithograph' ? 'foundry' : style] : undefined;
+  const industrialInk = atlas ? (ironworksPalettes[style === 'lithograph' ? 'foundry' : style]??ironworksPalettes.daylight) : undefined;
+  const shadowCast=style==='afternoon'?1.30:style==='overcast'?.88:1;
   const ironworksPilot = atlas || pilot === 'ironworks';
   const centrePilot = atlas || pilot === 'centre';
   const inside = ([x,y]) => x > -113*scale && x < map.width+113*scale
@@ -286,8 +287,8 @@ export function modelLandmarks({ map, scale, features, landmarks, screen, boxRin
   }
 
   function castShadow(ring, height) {
-    const dx = Math.min(88,height*0.72)*scale;
-    const dy = Math.min(48,height*0.69*region.pitch)*scale;
+    const dx = Math.min(88,height*0.72*shadowCast)*scale;
+    const dy = Math.min(48,height*0.69*region.pitch*shadowCast)*scale;
     for (const step of [0.20,0.39,0.58,0.76,0.89,1]) {
       map.polygon([ring.map(([x,y])=>[x+dx*step,y+dy*step])],(x,y)=>{
         const i = y*map.width+x;

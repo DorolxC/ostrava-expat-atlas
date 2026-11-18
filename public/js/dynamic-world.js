@@ -9,6 +9,9 @@ const ease=(t)=>{const k=clamp(t,0,1);return k*k*(3-2*k);};
 const overlaps=([l,t,r,b],box)=>l<box.right && r>box.left && t<box.bottom && b>box.top;
 const distance=(a,b)=>Math.hypot(b[0]-a[0],(b[1]-a[1])/region.pitch);
 const modulo=(a,b)=>(a%b+b)%b;
+const visibleFieldLimit=10;
+const residentFieldLimit=16;
+const concurrentFields=3;
 
 function decodeField(field,rle) {
   const raw=atob(rle);
@@ -52,7 +55,8 @@ function linear(points,stations,s,output) {
 function track({id,kind,points}) {
   const stations=new Float32Array(points.length),times=new Float32Array(points.length);
   const {speed,turn}=limits[kind];
-  const salt=Number(id.slice(1))|0;
+  const salt=(Number(id.slice(1)) ^ Math.imul(Math.round(points[0][0]*10),17) ^
+    Math.imul(Math.round(points[0][1]*10),31))|0;
   const cruise=speed*(.88+(salt>>>0)%17*.014);
   let [left,top]=points[0],right=left,bottom=top;
   for (let i=1;i<points.length;i++) {
@@ -85,10 +89,11 @@ function track({id,kind,points}) {
 function clipActor(context,actor,field,frame) {
   const {left,top,right,bottom}=actorBounds(actor.kind);
   const {x,y,scale,width,height,depth}=field;
-  const l=clamp(Math.floor((actor.wx+left)*scale)-x,0,width);
-  const r=clamp(Math.ceil((actor.wx+right)*scale)-x,0,width);
-  const t=clamp(Math.floor((actor.wy+top)*scale)-y,0,height);
-  const b=clamp(Math.ceil((actor.wy+bottom)*scale)-y,0,height);
+  const model=actor.zoom/frame.zoom;
+  const l=clamp(Math.floor((actor.wx+left*model)*scale)-x,0,width);
+  const r=clamp(Math.ceil((actor.wx+right*model)*scale)-x,0,width);
+  const t=clamp(Math.floor((actor.wy+top*model)*scale)-y,0,height);
+  const b=clamp(Math.ceil((actor.wy+bottom*model)*scale)-y,0,height);
   if (r===l || b===t) return false;
   const threshold=row=>Math.max(0,(actor.wy-(y+row+.5)/scale)/lift)*2+1.55;
   let open=0;
@@ -127,29 +132,53 @@ async function json(base,file,revision) {
 
 export async function loadDynamicWorld(base,revision) {
   const [routes,scenery]=await Promise.all([json(base,'world-routes.json',revision),json(base,'world-depth.json',revision)]);
-  if (routes.version!==1 || scenery.version!==2 || scenery.geometry!==routes.geometry || scenery.tileRevision!==revision) {
+  if (routes.version!==1 || scenery.version!==2 || scenery.geometry!==routes.geometry ||
+    scenery.tileRevision!==revision || scenery.revision!==routes.revision) {
     throw new Error('City life data belongs to a different tile revision');
   }
   const fields=new Map(scenery.fields.map(field=>[field.id,field]));
-  const locations=routes.regions.filter(area=>fields.has(area.id)).map(area=>({...area,tracks:area.routes.map(track),field:fields.get(area.id)}));
+  const locations=routes.regions.filter(area=>fields.has(area.id)).map(area=>({...area,field:fields.get(area.id)}));
   const atmosphere=createAmbientWorld();
   const paintActor=createActorPainter();
   const before=[0,0],after=[0,0],position=[0,0];
-  const actorPool=locations.flatMap(area=>area.tracks.flatMap(route=>Array.from({length:route.agents},(_,index)=>({route,index,field:area.field,kind:route.kind,variant:(route.salt+index*13)>>>0}))));
+  const resident=new Map();
   const visible=[];
-  let lastFrame,areas,actors,viewBounds;
+  let lastFrame,areas,viewBounds,loading=0;
+
+  function cast(area) {
+    area.actors ??= area.routes.flatMap(source=>{
+      const route=track(source);
+      return Array.from({length:route.agents},(_,index)=>({route,index,field:area.field,kind:route.kind,variant:(route.salt+index*13)>>>0}));
+    });
+    return area.actors;
+  }
 
   function prepare(field,now) {
-    if (field.depth || field.pending || (field.failures??0)>=2 || now<(field.retryAt??0)) return;
+    if (field.depth) {
+      resident.delete(field.id);
+      resident.set(field.id,field);
+      return;
+    }
+    if (loading>=concurrentFields || field.pending || (field.failures??0)>=2 || now<(field.retryAt??0)) return;
     field.pending=true;
-    json(base,field.file,revision).then(({id,tileRevision,rle})=>{
-      if (id!==field.id || tileRevision!==revision) throw new Error('Foreground depth belongs to a different scene');
+    loading++;
+    json(base,field.file,routes.revision??revision).then(({id,tileRevision,revision:activityRevision,rle})=>{
+      if (id!==field.id || tileRevision!==revision || activityRevision!==routes.revision) throw new Error('Foreground depth belongs to a different scene');
       field.depth=decodeField(field,rle);
+      resident.set(field.id,field);
+      if (resident.size>residentFieldLimit) {
+        for (const [id,retired] of resident) {
+          if (areas.some(area=>area.id===id)) continue;
+          retired.depth=null;
+          resident.delete(id);
+          break;
+        }
+      }
     }).catch(error=>{
       field.failures=(field.failures??0)+1;
       field.retryAt=performance.now()+700;
       if (field.failures===2) console.warn('Foreground depth is unavailable for '+field.id+'.',error);
-    }).finally(()=>{field.pending=false;});
+    }).finally(()=>{field.pending=false;loading--;});
   }
 
   function visibility(x,y,height) {
@@ -166,8 +195,9 @@ export async function loadDynamicWorld(base,revision) {
     if (lastFrame!==frame) {
       lastFrame=frame;
       viewBounds=box;
-      areas=locations.filter(({bounds})=>overlaps(bounds,box));
-      actors=actorPool.filter(({route})=>overlaps(route.bounds,box));
+      const x=(box.left+box.right)/2,y=(box.top+box.bottom)/2;
+      const priority=({anchor:[ax,ay]})=>(ax-x)**2+(ay-y)**2;
+      areas=locations.filter(({bounds})=>overlaps(bounds,box)).sort((a,b)=>priority(a)-priority(b)).slice(0,visibleFieldLimit);
     }
     if (frame.scene && frame.zoom>=.82) {
       const now=performance.now();
@@ -175,36 +205,39 @@ export async function loadDynamicWorld(base,revision) {
     }
     // Atmospheric shade also belongs to the atlas grid between activity areas.
     atmosphere(context,frame,seconds,areas,areas.some(({field})=>field.depth) ? crowns() : [],visibility);
-    if (frame.zoom<.93 || !actors.length) {
+    if (frame.zoom<.90 || !areas.length) {
       for (const tram of trams) paintTram(context,frame,tram);
       return;
     }
     visible.length=0;
     const [ox,oy]=frame.origin;
-    for (const actor of actors) {
-      if (!actor.field.depth) continue;
-      const {route,index,kind}=actor;
-      const {points,stations,times,duration,period,salt,turn}=route;
-      const offset=duration*(.20+(salt>>>0)%25*.019)+index*duration*.45;
-      const stage=modulo(seconds+offset,period);
-      if (stage>=duration) continue;
-      const i=indexAt(times,stage);
-      const t=(stage-times[i])/(times[i+1]-times[i]);
-      const at=stations[i]+(stations[i+1]-stations[i])*t;
-      linear(points,stations,at,position);
-      const [wx,wy]=position;
-      if (wx<viewBounds.left || wx>viewBounds.right || wy<viewBounds.top || wy>viewBounds.bottom) continue;
-      linear(points,stations,at-turn,before);
-      linear(points,stations,at+turn,after);
-      actor.x=ox+wx*frame.zoom;
-      actor.y=oy+wy*frame.zoom;
-      actor.wx=wx;
-      actor.wy=wy;
-      actor.heading=Math.atan2((after[1]-before[1])/region.pitch,after[0]-before[0]);
-      actor.phase=at*(kind==='walker'?5.65:kind==='cycle'?2.9:3.4);
-      actor.opacity=ease(Math.min(stage,duration-stage)/limits[kind].fade);
-      actor.zoom=frame.zoom;
-      visible.push(actor);
+    for (const area of areas) {
+      if (!area.field.depth) continue;
+      for (const actor of cast(area)) {
+        const {route,index,kind}=actor;
+        if (!overlaps(route.bounds,viewBounds)) continue;
+        const {points,stations,times,duration,period,salt,turn}=route;
+        const offset=duration*(.24+(salt>>>0)%23*.014)+index*duration*.37;
+        const stage=modulo(seconds+offset,period);
+        if (stage>=duration) continue;
+        const i=indexAt(times,stage);
+        const t=(stage-times[i])/(times[i+1]-times[i]);
+        const at=stations[i]+(stations[i+1]-stations[i])*t;
+        linear(points,stations,at,position);
+        const [wx,wy]=position;
+        if (wx<viewBounds.left || wx>viewBounds.right || wy<viewBounds.top || wy>viewBounds.bottom) continue;
+        linear(points,stations,at-turn,before);
+        linear(points,stations,at+turn,after);
+        actor.x=ox+wx*frame.zoom;
+        actor.y=oy+wy*frame.zoom;
+        actor.wx=wx;
+        actor.wy=wy;
+        actor.heading=Math.atan2((after[1]-before[1])/region.pitch,after[0]-before[0]);
+        actor.phase=at*(kind==='walker'?5.65:kind==='cycle'?2.9:3.4);
+        actor.opacity=ease(Math.min(stage,duration-stage)/limits[kind].fade);
+        actor.zoom=frame.zoom*(kind==='walker'?1.18:kind==='cycle'?1.09:1);
+        visible.push(actor);
+      }
     }
     visible.sort((a,b)=>a.wy-b.wy || a.wx-b.wx);
     let nextTram=0;

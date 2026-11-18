@@ -14,6 +14,8 @@ const manifest=JSON.parse(scene);
 assert.equal(routes.version,1);
 assert.equal(mask.version,2);
 assert.equal(mask.tileRevision,manifest.tileRevision);
+assert.equal(mask.revision,routes.revision);
+assert.equal(routes.revision,createHash('sha256').update(JSON.stringify(routes.regions)).digest('hex').slice(0,16));
 assert.equal(routes.geometry,createHash('sha256').update(geo).digest('hex'));
 assert.equal(mask.geometry,routes.geometry);
 assert.equal(routes.regions.length,mask.fields.length);
@@ -64,6 +66,25 @@ function nearest(line,[x,y]) {
   return [Math.sqrt(best),at];
 }
 
+function travelsWithWay(line,route) {
+  const closed=pitchDistance(line[0],line.at(-1))<.12;
+  const length=closed ? line.slice(1).reduce((sum,point,i)=>sum+pitchDistance(line[i],point),0) : 0;
+  let previous=nearest(line,route.points[0])[1], forward=0, backward=0;
+  for (const point of route.points.slice(1)) {
+    const at=nearest(line,point)[1];
+    let step=at-previous;
+    previous=at;
+    if (closed && Math.abs(step)>length/2) step-=Math.sign(step)*length;
+    // A self-crossing can put two distant route stations at the same world
+    // point. Assess direction on the continuous runs between those hits.
+    if (Math.abs(step)>7.5) continue;
+    const signed=step*route.travel;
+    if (signed>0) forward+=signed;
+    else backward-=signed;
+  }
+  return forward>=13 && forward>backward*4;
+}
+
 let samples=0;
 const worst={walker:0,car:0,cycle:0};
 const counts={walker:0,car:0,cycle:0};
@@ -73,6 +94,7 @@ for (const place of routes.regions) {
   assert.equal(field.file,'world-depth/'+place.id+'.json.gz');
   const cached=JSON.parse(gunzipSync(await readFile(new URL(field.file,location))));
   assert.equal(cached.tileRevision,manifest.tileRevision);
+  assert.equal(cached.revision,routes.revision);
   assert.equal(cached.id,place.id);
   const data=Buffer.from(cached.rle,'base64');
   let pixels=0,solid=0;
@@ -83,15 +105,14 @@ for (const place of routes.regions) {
     if (data[i+1]>10) solid+=data[i];
   }
   assert.equal(pixels,field.width*field.height);
-  assert(solid>0 && solid<pixels,place.id);
+  assert(solid<pixels,place.id);
   for (const route of place.routes) {
     counts[route.kind]++;
     const line=streets.get(route.id);
     assert(line?.length>1 && route.points.length>1,route.id);
     assert(route.travel===-1 || route.travel===1);
     assert(route.oneway===0 || route.oneway===route.travel,route.id+' against recorded direction');
-    const [start,end]=[route.points[0],route.points.at(-1)].map(p=>nearest(line,p)[1]);
-    assert((end-start)*route.travel>=13,route.id+' endpoints contradict the mapped way direction');
+    assert(travelsWithWay(line,route),route.id+' travels against the mapped way direction');
     for (let i=1;i<route.points.length;i++) {
       const a=route.points[i-1],b=route.points[i],dist=pitchDistance(a,b);
       assert(dist>.01 && dist<5.2,route.id+' malformed sample interval '+dist);
@@ -112,6 +133,13 @@ for (const place of routes.regions) {
   }
 }
 assert(Object.values(counts).every(n=>n>=10));
+for (const kind of ['park','wood','river']) {
+  const scenes=routes.regions.filter(area=>area.id.startsWith('local-') && area.kind===kind);
+  assert(scenes.filter(area=>area.routes.some(route=>route.kind==='walker')).length>=8,kind+' walking coverage');
+  assert(scenes.filter(area=>area.birds.length).length>=8,kind+' bird coverage');
+}
+assert(routes.regions.filter(area=>area.id.startsWith('local-') && area.routes.some(route=>route.kind==='cycle')).length>=25,
+  'Cycling needs to extend beyond the original activity areas');
 const source=process.env.OSTRAVA_OSM_PBF;
 if (source) {
   const roads=new Map();

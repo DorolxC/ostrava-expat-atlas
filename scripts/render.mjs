@@ -19,8 +19,8 @@ const overhang = 205;
 const chunkMeters = 1900;
 const encoder = process.env.OSTRAVA_CWEBP;
 const extension = encoder ? 'webp' : 'png';
-const artStyles = ['atlas', 'foundry', 'daylight', 'lithograph'];
-const defaultStyle = 'daylight';
+const artStyles = ['atlas', 'foundry', 'daylight', 'lithograph', 'afternoon', 'overcast'];
+const defaultStyle = 'afternoon';
 const lowLevel = {name:'atlas',scale:2.78,minZoom:0.34};
 
 const close = ([lon,lat,w,h,oy=0]) => {
@@ -92,7 +92,7 @@ async function loadScene() {
       return [x*scale-ox,y*scale-oy];
     };
     const raster = paintSection({scale,ox,oy,width,height,layers,landmarks:structures,screen,relief,recordTree,recordRoof,pilot,style});
-    if (!workerData?.canopiesOnly) coverage.blend(raster,scale,ox,oy,outside);
+    if (!workerData?.canopiesOnly && !workerData?.depth) coverage.blend(raster,scale,ox,oy,outside);
     return raster;
   }
   return {coverage,render,bounds:geography.bounds,featureCount:geography.features.length};
@@ -274,7 +274,12 @@ function requestedStyle(fallback) {
   return style;
 }
 
-if (!isMainThread) {
+if (!isMainThread && workerData.depth) {
+  const {depthField}=await import('./world-depth.mjs');
+  const scene=await loadScene();
+  const {depth,style}=workerData;
+  parentPort.postMessage(depth.map(({id,bounds})=>({id,...depthField(scene.render,bounds,style)})));
+} else if (!isMainThread) {
   const scene = await loadScene();
   const { plans: jobs, canopiesOnly: rows, pilotOnly, style, section, targets }=workerData;
   const levels = [];
@@ -360,10 +365,16 @@ if (!isMainThread) {
   }
   console.log('Rendered '+destination);
 } else if (process.argv.includes('--world-depth')) {
-  const { writeDepth }=await import('./world-depth.mjs');
-  const [manifest,routes,scene]=await Promise.all([load('scene.json'),load('world-routes.json'),loadScene()]);
+  const { writeDepthAssets }=await import('./world-depth.mjs');
+  const [manifest,routes]=await Promise.all([load('scene.json'),load('world-routes.json')]);
   const style=requestedStyle(manifest.artStyle);
-  await writeDepth(scene.render,routes,manifest,style,new URL('world-depth.json',output));
+  const count=Math.max(1,Math.min(4,availableParallelism()-1,routes.regions.length));
+  const groups=Array.from({length:count},()=>[]);
+  for (const [i,{id,bounds}] of routes.regions.entries()) groups[i%count].push({id,bounds});
+  const parts=await Promise.all(groups.map(depth=>runWorker({depth,style})));
+  const fields=new Map(parts.flat().map(field=>[field.id,field]));
+  await writeDepthAssets({fields:routes.regions.map(({id})=>fields.get(id)),geometry:routes.geometry,
+    revision:routes.revision,tileRevision:style===manifest.artStyle?manifest.tileRevision:null},new URL('world-depth.json',output));
 } else if (process.argv.includes('--audit-seam')) {
   const at=process.argv.indexOf('--audit-seam');
   const [name,lon,lat,axis='x']=process.argv.slice(at+1,at+5);

@@ -42,10 +42,10 @@ function cloudTexture(seed) {
     const xx = x + (random(seed + index * 13) - .5) * 9;
     const yy = y + (random(seed + index * 29) - .5) * 22;
     const shade = context.createRadialGradient(xx, yy, radius * .15, xx, yy, radius);
-    shade.addColorStop(0, 'rgba(27, 37, 56, .21)');
-    shade.addColorStop(.42, 'rgba(31, 42, 61, .16)');
-    shade.addColorStop(.75, 'rgba(37, 46, 61, .065)');
-    shade.addColorStop(1, 'rgba(31, 39, 62, 0)');
+    shade.addColorStop(0, 'rgba(42, 48, 74, .22)');
+    shade.addColorStop(.42, 'rgba(50, 53, 79, .17)');
+    shade.addColorStop(.75, 'rgba(61, 54, 79, .064)');
+    shade.addColorStop(1, 'rgba(61, 54, 79, 0)');
     context.fillStyle = shade;
     context.fillRect(xx - radius, yy - radius, 2 * radius, 2 * radius);
   }
@@ -235,7 +235,7 @@ function paintBirds(context, frame, seconds, regions, occlusion) {
       random(flightSeed + 198) * tau;
     const speed = 4.9 + random(flightSeed + 4) * 2.16;
     const turn = (random(flightSeed + 88) - .42) * .20;
-    const members = Math.min(11 - count, 3 + flightSeed % 3);
+    const members = Math.min(11 - count, 2 + flightSeed % 3);
     for (let i = 0; i < members; i++) {
       const member = flightSeed + i * 17;
       const age = since - i * .26;

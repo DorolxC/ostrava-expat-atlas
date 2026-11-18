@@ -121,7 +121,7 @@ function surfaceCover(tags) {
 }
 
 export function transportState(kind,tags,style) {
-  const atlasStyle=Object.hasOwn(transportStyles,style) || style==='daylight' || style==='lithograph';
+  const atlasStyle=Object.hasOwn(transportStyles,style) || ['daylight','lithograph','afternoon','overcast'].includes(style);
   const restoredCover = kind!=='waterline' && atlasStyle && surfaceCover(tags);
   const grade = restoredCover && tags.layer==null ? Number(bridgeDeck(tags)) : transportGrade(tags);
   const hasSurface = !isBelowSurface(tags) || restoredCover;

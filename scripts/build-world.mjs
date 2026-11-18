@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { project, region } from '../public/js/geo.js';
 import { readPbf } from './data/osm-pbf.mjs';
 import { bridgeDeck, isBelowSurface, offsetPath, roadWidth, transportGrade } from './transport.mjs';
+import { activityGrid, polygonContains as inside } from './activity-grid.mjs';
 
 const root=new URL('../public/map/',import.meta.url);
 const source=process.argv[2] || process.env.OSTRAVA_OSM_PBF || new URL('./data/Ostrava.osm.pbf',import.meta.url);
@@ -34,20 +35,22 @@ const insideBox=(x,y,[l,t,r,b],pad=0)=>x>=l+pad && x<=r-pad && y>=t+pad && y<=b-
 const ringsOf=(f)=>f.points.map(ring=>ring.map(p=>project(...p)));
 const city=boundary.geometry.coordinates.flat().map(ring=>ring.map(p=>project(...p)));
 
-function inside(rings,x,y) {
-  let hit=false;
-  for (const ring of rings) for (let i=1;i<ring.length;i++) {
-    const [ax,ay]=ring[i-1], [bx,by]=ring[i];
-    if ((ay>y)!==(by>y) && x<ax+(bx-ax)*(y-ay)/(by-ay)) hit=!hit;
-  }
-  return hit;
-}
-
 const regions=limits.map(([id,kind,lon,lat,w,h,birds])=>{
   const [x,y]=project(lon,lat);
   return {id,kind,anchor:tenth([x,y]),bounds:[Math.floor(x-w),Math.floor(y-h),Math.ceil(x+w),Math.ceil(y+h)],
     birds:birds.map(p=>tenth(project(...p))),routes:[]};
 });
+const roads=[];
+for (const feature of features) {
+  const tags=feature.kind==='road' && rawTags.get(feature.id);
+  if (!tags) continue;
+  const modes=kinds(tags);
+  if (!modes.length) continue;
+  const [line]=ringsOf(feature);
+  if (line.length>1) roads.push({id:feature.id,tags,modes,line});
+}
+const {habitatAt,areas:discovered}=activityGrid(features,roads,city);
+regions.push(...discovered);
 const blockGrid=new Map();
 const cell=48;
 for (const f of features) {
@@ -73,19 +76,20 @@ function room([x,y], radius) {
     surface(x,y-radius*pitch) && surface(x,y+radius*pitch);
 }
 
-const driving=/^(primary|secondary|tertiary|residential|unclassified|living_street)$/;
-const sidewalk=/^(footway|pedestrian|path)$/;
-const denied=/^(no|private|customers|permit|agricultural|forestry|destination|delivery)$/;
-const allowed=(tags,key)=>!denied.test(tags[key] ?? tags.access ?? '') && !tags[`${key}:conditional`] && !tags['access:conditional'];
-const positive=tag=>tag==='yes' || tag==='designated';
 function kinds(tags) {
+  const driving=/^(primary|secondary|tertiary|residential|unclassified|living_street)$/;
+  const sidewalk=/^(footway|pedestrian|path)$/;
+  const denied=/^(no|private|customers|permit|agricultural|forestry|destination|delivery|dismount|use_sidepath)$/;
+  const allowed=key=>!denied.test(tags[key] ?? (key==='foot'?undefined:tags.vehicle) ?? tags.access ?? '') &&
+    !tags[`${key}:conditional`] && !tags['access:conditional'];
+  const positive=tag=>tag==='yes' || tag==='designated' || tag==='permissive';
   if (transportGrade(tags)!==0 || isBelowSurface(tags) || bridgeDeck(tags) || (tags.tunnel && tags.tunnel!=='no') || tags.area==='yes') return [];
   const modes=[];
-  if (sidewalk.test(tags.highway) && allowed(tags,'foot') && tags.footway!=='crossing' &&
-    (tags.highway!=='path' || tags.foot!=='no')) modes.push('walker');
-  if (driving.test(tags.highway) && allowed(tags,'motor_vehicle') && allowed(tags,'motorcar') && !denied.test(tags.vehicle??'')) modes.push('car');
-  if ((tags.highway==='cycleway' || sidewalk.test(tags.highway) && positive(tags.bicycle)) &&
-    allowed(tags,'bicycle') && !/sand|mud|grass/.test(tags.surface??'')) modes.push('cycle');
+  const shared=['cycleway','track','bridleway'].includes(tags.highway) && positive(tags.foot);
+  if ((sidewalk.test(tags.highway) || shared) && allowed('foot') && tags.footway!=='crossing') modes.push('walker');
+  if (driving.test(tags.highway) && allowed('motor_vehicle') && allowed('motorcar')) modes.push('car');
+  if ((tags.highway==='cycleway' || (sidewalk.test(tags.highway) || tags.highway==='track') && positive(tags.bicycle)) &&
+    allowed('bicycle') && !/sand|mud|grass/.test(tags.surface??'')) modes.push('cycle');
   return modes;
 }
 
@@ -114,7 +118,7 @@ function roundCorners(points,cut) {
 
 // A sampled route can stop at the edge of the authored activity area or at a
 // source obstruction. Split there so no hidden leg need cross water or a wall.
-function segments(path,bounds,margin,limit) {
+function segments(path,bounds,margin,limit,qualifies) {
   const result=[];
   let current=[],length=0;
   const flush=()=>{
@@ -128,7 +132,7 @@ function segments(path,bounds,margin,limit) {
     const count=Math.max(1,Math.ceil(dist(a,b)/1.4));
     for (let j=i===1 ? 0 : 1;j<=count;j++) {
       const p=move(a,b,j/count);
-      if (!insideBox(p[0],p[1],bounds,22) || !room(p,margin) || !inside(city,...p)) {flush();continue;}
+      if (!insideBox(p[0],p[1],bounds,22) || !room(p,margin) || !inside(city,...p) || !qualifies(...p)) {flush();continue;}
       const last=current.at(-1);
       if (last && dist(last,p)>2.3) flush();
       if (current.length) length+=dist(current.at(-1),p);
@@ -147,13 +151,7 @@ function quantizePath(path) {
 
 const candidates=new Map(regions.map(r=>[r.id,[]]));
 const laneDistance=(tags,kind)=>kind==='car' ? Math.min(1.64,roadWidth(tags)*.22) : kind==='cycle' ? Math.min(.55,roadWidth(tags)*.18) : 0;
-for (const feature of features) {
-  const tags=feature.kind==='road' && rawTags.get(feature.id);
-  if (!tags) continue;
-  const modes=kinds(tags);
-  if (!modes.length) continue;
-  const [line]=ringsOf(feature);
-  if (line.length<2) continue;
+for (const {id,tags,modes,line} of roads) {
   const e=extent(line);
   const areas=regions.filter(({bounds})=>intersects(bounds,e));
   if (!areas.length) continue;
@@ -166,8 +164,10 @@ for (const feature of features) {
       const lane=kind==='car' && direction!==0 && (roadWidth(tags)<4.8 || tags.lanes==='1') ? 0 : laneDistance(tags,kind);
       const points=roundCorners(lane ? offsetPath(ordered,lane) : ordered,kind==='car' ? 2.3 : kind==='cycle' ? 1.2 : .7);
       for (const area of areas) {
+        if (area.core && kind==='car' && ['wood','park'].includes(area.kind)) continue;
         const minimum=kind==='car' ? 54 : kind==='cycle' ? 43 : 24;
-        const routes=segments(points,area.bounds,kind==='car'?1.15:kind==='cycle'?.59:.38,minimum);
+        const qualifies=area.core ? (x,y)=>habitatAt(x,y)!=='restricted' : ()=>true;
+        const routes=segments(points,area.bounds,kind==='car'?1.15:kind==='cycle'?.59:.38,minimum,qualifies);
         for (const route of routes) {
           if (route.length>265) {
             let index=0,d=0;
@@ -175,11 +175,15 @@ for (const feature of features) {
             route.points=route.points.slice(index,index+Math.round(245/1.25));
           }
           const path=quantizePath(route.points);
+          if (path.length<2) continue;
           const center=path[Math.floor(path.length/2)];
+          if (area.core && !insideBox(...center,area.core)) continue;
+          const habitat=area.core && habitatAt(...center);
           const square=area.kind==='square' && kind==='walker';
           const score=Math.min(160,route.length)*.49-dist(area.anchor,center)*.68+
-            (square && tags.highway==='pedestrian' ? 47 : 0)+(kind==='cycle' && tags.highway==='cycleway' ? 18 : 0);
-          candidates.get(area.id).push({kind,id:feature.id,points:path,score,travel,oneway:direction,
+            (square && tags.highway==='pedestrian' ? 47 : 0)+(kind==='cycle' && tags.highway==='cycleway' ? 18 : 0)+
+            (area.core && habitat===area.kind && habitat!=='street' ? 42 : 0);
+          candidates.get(area.id).push({kind,id,points:path,score,travel,oneway:direction,
             highway:tags.highway,street:tags.name || undefined});
         }
       }
@@ -187,24 +191,36 @@ for (const feature of features) {
   }
 }
 
-const owned=new Set();
+const owned=new Map();
 for (const area of regions) {
   const list=candidates.get(area.id).sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id) || b.travel-a.travel);
-  const max=area.kind==='square' || area.kind==='park' ? [5,2,2] : [3,3,2];
+  const max=area.core ? [area.kind==='street'?2:3,1,2] : area.kind==='square' || area.kind==='park' ? [5,2,2] : [3,3,2];
   for (const [i,mode] of ['walker','car','cycle'].entries()) {
     let count=0;
     for (const {score,...route} of list) {
       if (count===max[i] || route.kind!==mode || route.points.length<2) continue;
       const key=route.kind+'/'+route.id;
-      if (owned.has(key)) continue;
-      owned.add(key);
+      const center=route.points[Math.floor(route.points.length/2)];
+      const previous=owned.get(key)??[];
+      if (previous.some(p=>!area.core || dist(p,center)<(mode==='walker'?110:180))) continue;
+      previous.push(center);
+      owned.set(key,previous);
       count++;
       area.routes.push(route);
     }
   }
+  if (area.core && ['park','wood','river'].includes(area.kind) && area.routes.length) {
+    const perches=[area.anchor,...area.routes.filter(({kind})=>kind!=='car').map(({points})=>points[Math.floor(points.length/2)])];
+    area.birds=perches.filter((point,i)=>habitatAt(...point)===area.kind &&
+      insideBox(...point,area.bounds,58) && perches.slice(0,i).every(other=>dist(other,point)>70)).slice(0,2).map(tenth);
+  }
+  area.anchor=tenth(area.anchor);
   area.birds=area.birds.filter(p=>room(p,1) && inside(city,...p));
   console.log(area.id+': '+area.routes.map(r=>r.kind+' '+r.id).join(', ')+' / '+area.birds.length+' bird sites');
 }
 
-await writeFile(new URL('world-routes.json',root),JSON.stringify({version:1,sourceTime,
-  geometry:createHash('sha256').update(geographyBytes).digest('hex'),regions}));
+const populated=regions.filter(area=>area.routes.length || area.birds.length).map(({id,kind,anchor,bounds,routes,birds})=>
+  ({id,kind,anchor,bounds,routes,birds}));
+const revision=createHash('sha256').update(JSON.stringify(populated)).digest('hex').slice(0,16);
+await writeFile(new URL('world-routes.json',root),JSON.stringify({version:1,sourceTime,revision,
+  geometry:createHash('sha256').update(geographyBytes).digest('hex'),regions:populated}));

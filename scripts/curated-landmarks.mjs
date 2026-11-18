@@ -2,7 +2,7 @@ import { shade } from './raster.mjs';
 import { buildRoof, roofLight } from './roof-shapes.mjs';
 import { bridgeDeck, transportGrade } from './transport.mjs';
 
-export const curatedLandmarkStyles = new Set(['daylight', 'lithograph']);
+export const curatedLandmarkStyles = new Set(['daylight', 'lithograph', 'afternoon', 'overcast']);
 
 export function curatedLandmarkReplacements(landmarks, style) {
   const buildings = new Set();
