@@ -63,13 +63,14 @@ export function prepareEnvironment(frame, records, flow, sample, foliage, paintS
 
 export const environmentPadding=(frame)=>Math.min(84,Math.round(Math.min(frame.width,frame.height)*.13));
 
-export function environmentPainter() {
+export function environmentPainter(probe) {
   const diagnostic=new URL(location.href).searchParams.get('motion')==='diagnostic';
   const cached = new Map();
   let current, previous, changedAt, pending, worker, sample, unavailableKey;
   let canUseWorker = typeof Worker === 'function' && typeof OffscreenCanvas === 'function';
 
-  function commit(view, {water, trees, ratio, atlas, fountains}) {
+  function commit(view, {water, trees, ratio, atlas, fountains, timing}) {
+    const begin=performance.now();
     pending = null;
     if (water) {
       const {spans, ribbons} = water;
@@ -87,6 +88,8 @@ export function environmentPainter() {
       retired.atlas?.close?.();
       cached.delete(oldest);
     }
+    if (probe) probe.environment={...timing,elapsedMs:performance.now()-view.started,commitMs:performance.now()-begin,
+      worker:!!worker,cachedPatches:cached.size,treeSprites:trees.length,ribbons:water?.ribbons.length??0};
   }
 
   function fallBack() {
@@ -101,7 +104,7 @@ export function environmentPainter() {
     const {key, painted, background} = scene;
     const pad=environmentPadding(frame);
     const view = {key, zoom, width:width+2*pad, height:height+2*pad, origin:origin.map(n=>n+pad),
-      background, diagnostic, pixelRatio:mapCanvas.width/width};
+      background, diagnostic, pixelRatio:mapCanvas.width/width, started:performance.now()};
     if (canUseWorker) {
       try {
         if (!worker) {
@@ -118,7 +121,7 @@ export function environmentPainter() {
         // Share the compressed tile bytes already fetched by the viewer.
         // Decoding and compositing them here would stall the interactive canvas.
         const layers=painted.map(({rect:[x,y,w,h],...layer})=>({...layer,rect:[x+pad,y+pad,w,h]}));
-        worker.postMessage({layers, view, records, flow, fountains});
+        worker.postMessage({layers, view, records, flow, fountains,diagnostic:!!probe});
         return;
       } catch {
         fallBack();

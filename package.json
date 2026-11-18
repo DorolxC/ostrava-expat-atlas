@@ -1,6 +1,6 @@
 {
   "name": "ostrava-expat-atlas",
-  "version": "5.3.1",
+  "version": "5.3.2",
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
@@ -18,6 +18,7 @@
     "map:canopies": "node scripts/render.mjs --canopies",
     "map:render": "node scripts/render.mjs && node scripts/render.mjs --world-depth",
     "map:pilots": "node scripts/render.mjs --pilots && node scripts/render.mjs --world-depth",
+    "map:postcard": "node scripts/render.mjs --masaryk-postcard",
     "check": "node scripts/check.mjs && node scripts/geometry-audit.mjs && node scripts/check-world.mjs && npm run check:roofs",
     "check:world": "node scripts/check-world.mjs",
     "check:roofs": "node --test scripts/roof-shapes.test.mjs scripts/roof-fixtures.test.mjs",

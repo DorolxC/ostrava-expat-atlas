@@ -340,6 +340,8 @@ const formatCoord=(part,hemisphere)=>Math.abs(part).toFixed(4)+'° '+hemisphere;
 
 function positionFrame(frame) {
   const {width,height,zoom,pointOnScreen}=frame;
+  if (frame.hasArtwork) el('map-message').hidden=true;
+  else if (frame.unavailable) el('map-message').textContent='Map artwork could not load. The place index is available.';
   if ((ambientZoom<LIFE_MIN_ZOOM)!==(zoom<LIFE_MIN_ZOOM)) {
     ambientZoom=zoom;
     updateAmbientNote();
@@ -568,7 +570,6 @@ try {
   viewer=mapViewer;
   updateAmbient();
   setDistricts(districtData.districts);
-  el('map-message').hidden=true;
   window.addEventListener('popstate',restoreRoute);
   restoreRoute();
 } catch (error) {

@@ -1,5 +1,6 @@
 import { region } from './geo.js';
 import { windArrival, windGust } from './wind.js';
+import { LIFE_MIN_ZOOM, STREET_LIFE_ZOOM } from './life-lod.js';
 
 const tau = 2 * Math.PI;
 const lift = Math.sqrt(1 - region.pitch ** 2);
@@ -42,9 +43,9 @@ function cloudTexture(seed) {
     const xx = x + (random(seed + index * 13) - .5) * 9;
     const yy = y + (random(seed + index * 29) - .5) * 22;
     const shade = context.createRadialGradient(xx, yy, radius * .15, xx, yy, radius);
-    shade.addColorStop(0, 'rgba(42, 48, 74, .22)');
-    shade.addColorStop(.42, 'rgba(50, 53, 79, .17)');
-    shade.addColorStop(.75, 'rgba(61, 54, 79, .064)');
+    shade.addColorStop(0, 'rgba(50, 55, 85, .28)');
+    shade.addColorStop(.42, 'rgba(50, 55, 85, .21)');
+    shade.addColorStop(.75, 'rgba(61, 57, 88, .075)');
     shade.addColorStop(1, 'rgba(61, 54, 79, 0)');
     context.fillStyle = shade;
     context.fillRect(xx - radius, yy - radius, 2 * radius, 2 * radius);
@@ -54,7 +55,7 @@ function cloudTexture(seed) {
 
 function paintClouds(context, textures, frame, seconds) {
   const {origin: [ox, oy], zoom, width, height, coverage} = frame;
-  const driftX = seconds * 7.4;
+  const driftX = seconds * 9.2;
   const driftY = seconds * 1.61;
   const left = (-ox) / zoom - driftX;
   const top = (-oy) / zoom - driftY;
@@ -62,6 +63,7 @@ function paintClouds(context, textures, frame, seconds) {
   const bottom = top + height / zoom;
   const previousSmoothing = context.imageSmoothingEnabled;
   const previousAlpha = context.globalAlpha;
+  let painted=0;
   if (coverage) {
     const [x, y, ex, ey] = coverage;
     context.save();
@@ -84,7 +86,10 @@ function paintClouds(context, textures, frame, seconds) {
       if (sx >= width || sy >= height || sx + w <= 0 || sy + h <= 0) continue;
       context.globalAlpha = previousAlpha * (.67 + random(seed + 3) * .30);
       const texture = textures[seed % textures.length];
-      if (texture) context.drawImage(texture, sx, sy, w, h);
+      if (texture) {
+        context.drawImage(texture, sx, sy, w, h);
+        painted++;
+      }
     }
   }
   if (coverage) context.restore();
@@ -92,6 +97,7 @@ function paintClouds(context, textures, frame, seconds) {
     context.imageSmoothingEnabled = previousSmoothing;
     context.globalAlpha = previousAlpha;
   }
+  return painted;
 }
 
 function paintLeaf(context, x, y, size, turn, facing, light, seed) {
@@ -118,13 +124,13 @@ function paintLeaf(context, x, y, size, turn, facing, light, seed) {
 }
 
 function paintLeaves(context, frame, seconds, crowns, occlusion) {
-  if (frame.zoom < .88) return;
+  if (frame.zoom < STREET_LIFE_ZOOM) return 0;
   const alpha = context.globalAlpha;
   const {origin: [ox, oy], zoom} = frame;
   let painted = 0;
   for (const [tx, ty, radius, treeSeed, conifer] of crowns) {
     if (painted >= 16) break;
-    if (radius * zoom < 3.9) continue;
+    if (radius * zoom < 3.65) continue;
     const seed = hash(treeSeed) + hash(Math.round(tx) + Math.imul(Math.round(ty), 349));
     if (seed % (conifer ? 8 : 4) !== 0) continue;
     if (!visible(ox + tx * zoom, oy + ty * zoom, frame, 46 * zoom)) continue;
@@ -136,7 +142,7 @@ function paintLeaves(context, frame, seconds, crowns, occlusion) {
     if (age < 0 || age > 5.8) continue;
     const release = seconds - age;
     const gust = windGust(windArrival(tx, ty, treeSeed, release));
-    if (gust < .17) continue;
+    if (gust < .14) continue;
     const count = !conifer && gust > .48 ? 2 : 1;
     for (let i = 0; i < count; i++) {
       const variant = seed + 15 * i;
@@ -155,7 +161,7 @@ function paintLeaves(context, frame, seconds, crowns, occlusion) {
       const open = occlusion(x, y, height);
       if (open < .05) continue;
       context.globalAlpha = alpha * open * envelope(t * 13) * envelope((1 - t) * 6);
-      const size = clamp(zoom * (conifer ? .86 : 1.10), 1.62, 3.85);
+      const size = clamp(zoom * (conifer ? .94 : 1.18), 1.78, 3.85);
       const turn = time * (1.6 + random(variant + 11) * 1.12) + random(variant + 37) * tau;
       const facing = .45 + .55 * Math.abs(Math.cos(time * 2.8 + i));
       paintLeaf(context, dx, dy, size, turn, facing, curl > -.24, conifer);
@@ -163,6 +169,7 @@ function paintLeaves(context, frame, seconds, crowns, occlusion) {
     }
   }
   context.globalAlpha = alpha;
+  return painted;
 }
 
 function wing(context, sign, beat, pale) {
@@ -214,7 +221,7 @@ function paintBird(context, x, y, size, bearing, beat, pale) {
 }
 
 function paintBirds(context, frame, seconds, regions, occlusion) {
-  if (frame.zoom < .82) return;
+  if (frame.zoom < STREET_LIFE_ZOOM) return 0;
   const {origin: [ox, oy], zoom} = frame;
   const alpha = context.globalAlpha;
   let count = 0;
@@ -229,11 +236,12 @@ function paintBirds(context, frame, seconds, regions, occlusion) {
     const flight = 8.6 + random(flightSeed + 23) * 2.8;
     if (since > flight + 1.4) continue;
     const [startX, startY] = birds[flightSeed % birds.length];
+    const liftWind=windGust(windArrival(startX,startY,seed,seconds-since));
     const awayX = anchor[0] - startX;
     const awayY = (anchor[1] - startY) / region.pitch;
     const pathBearing = Math.hypot(awayX, awayY) > 18 ? Math.atan2(awayY, awayX) :
       random(flightSeed + 198) * tau;
-    const speed = 4.9 + random(flightSeed + 4) * 2.16;
+    const speed = 4.9 + random(flightSeed + 4) * 2.16 + liftWind*.85;
     const turn = (random(flightSeed + 88) - .42) * .20;
     const members = Math.min(11 - count, 2 + flightSeed % 3);
     for (let i = 0; i < members; i++) {
@@ -255,27 +263,29 @@ function paintBirds(context, frame, seconds, regions, occlusion) {
       const open = occlusion?.(x, y, altitude) ?? 1;
       if (open < .07) continue;
       const flap = Math.sin(age * (tau * (4.4 + random(member + 85) * .63)) + i * 1.3);
-      const glide = envelope((age - 2.5) / 4) * (.50 + Math.max(0, Math.sin(age * 1.86 + i)) * .49);
+      const glide = envelope((age - 2.5) / 4) * (.47 + liftWind*.19 + Math.max(0, Math.sin(age * 1.86 + i)) * .32);
       const beat = flap * (1 - glide) + glide * .64;
       const heading = pathBearing + turn * age * 1.28;
       const bearing = Math.atan2(Math.sin(heading) * region.pitch, Math.cos(heading));
-      const size = clamp(zoom * (.79 + random(member + 6) * .20), .90, 2.86);
+      const size = clamp(zoom * (.92 + random(member + 6) * .22), 1.18, 3.08);
       context.globalAlpha = alpha * open * envelope(age * 2.8) * envelope((flight - age) * .94);
       paintBird(context, dx, dy, size, bearing, beat, member % 4 < 2);
       count++;
     }
   }
   context.globalAlpha = alpha;
+  return count;
 }
 
 export function createAmbientWorld() {
   let textures;
-  return function paint(context, frame, seconds, visibleRegions, visibleCrowns, occlusion) {
-    if (frame.width < 1 || frame.height < 1 || frame.zoom < .43) return;
+  return function paint(context, frame, seconds, visibleRegions, visibleCrowns, occlusion, diagnostics) {
+    if (frame.width < 1 || frame.height < 1 || frame.zoom < LIFE_MIN_ZOOM) return;
     const regions = Array.isArray(visibleRegions) ? visibleRegions : Array.from(visibleRegions ?? []);
     textures ??= [23, 378, 602].map(cloudTexture);
-    paintClouds(context, textures, frame, seconds);
-    paintLeaves(context, frame, seconds, visibleCrowns ?? [], occlusion);
-    paintBirds(context, frame, seconds, regions, occlusion);
+    const clouds=paintClouds(context, textures, frame, seconds);
+    const leaves=paintLeaves(context, frame, seconds, visibleCrowns ?? [], occlusion);
+    const birds=paintBirds(context, frame, seconds, regions, occlusion);
+    if (diagnostics) return {clouds,leaves,birds};
   };
 }

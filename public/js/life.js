@@ -1,8 +1,10 @@
 import { region } from './geo.js';
 import { environmentPainter, environmentPadding } from './environment.js';
 import { loadDynamicWorld } from './dynamic-world.js';
+import { assetURL } from './asset-url.js';
+import { LIFE_MIN_ZOOM, STREET_LIFE_ZOOM } from './life-lod.js';
 
-export const LIFE_MIN_ZOOM = 0.43;
+export { LIFE_MIN_ZOOM } from './life-lod.js';
 const cellSize = 360;
 const pitch = region.pitch;
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -233,24 +235,23 @@ function paintTram(context,frame,{position,from,to,visibility,front,color}) {
   context.restore();
 }
 
-async function motionData(base, name) {
-  const response = await fetch(new URL(name, base));
+async function motionData(base, name, revision) {
+  const response = await fetch(assetURL(base,name,revision));
   if (!response.ok) throw new Error(name+' is unavailable');
   return response.json();
 }
 
-export async function loadLife(base,revision) {
+export async function loadLife(base,manifest,probe) {
   let paintWorld;
-  loadDynamicWorld(base,revision).then(paint=>{paintWorld=paint;}).catch(error=>{
-    console.warn('Street and sky motion is unavailable.',error);
-  });
+  let worldRequested=false;
+  if (probe) probe.world={state:'deferred',suppressed:'street life begins at zoom '+STREET_LIFE_ZOOM};
   const [data, crowns, flow] = await Promise.all([
-    motionData(base, 'motion.json'),
-    motionData(base, 'canopies.json').catch((error) => {
+    motionData(base, 'motion.json',manifest.assets?.motion),
+    motionData(base, 'canopies.json',manifest.assets?.canopies).catch((error) => {
       console.warn('Tree motion is unavailable.', error);
       return [];
     }),
-    motionData(base, 'river-flow.json').catch((error) => {
+    motionData(base, 'river-flow.json',manifest.assets?.riverFlow).catch((error) => {
       console.warn('Mapped water direction is unavailable.', error);
       return {samples: []};
     }),
@@ -261,11 +262,19 @@ export async function loadLife(base,revision) {
   const tracks = data.tracks.map(({points,controls=[]},index)=>({
     points,index,box:trackBounds(points),profile:routeProfile(points,controls,data.step,index),
   }));
-  const paintEnvironment = environmentPainter();
+  const paintEnvironment = environmentPainter(probe);
   const trams=[];
 
   return function paint(context, frame, timeMs) {
     if (frame.zoom < LIFE_MIN_ZOOM || frame.width < 1 || frame.height < 1) return false;
+    if (!worldRequested && frame.scene && frame.zoom>=STREET_LIFE_ZOOM) {
+      worldRequested=true;
+      if (probe) probe.world={state:'loading',suppressed:'checking world revisions'};
+      loadDynamicWorld(base,manifest,probe).then(paint=>{paintWorld=paint;}).catch(error=>{
+        if (probe) probe.world={...probe.world,state:'failed',suppressed:error.message};
+        console.warn('Street and sky motion is unavailable.',error);
+      });
+    }
     const box = bounds(frame, 34);
     const seconds = timeMs / 1000;
     context.save();

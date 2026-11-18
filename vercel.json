@@ -6,6 +6,11 @@
   "outputDirectory": "dist",
   "headers": [
     {
+      "source": "/map/(overview\\.webp|(?:atlas|street-[0-9]+)\\/[0-9]+-[0-9]+\\.webp)",
+      "has": [{ "type": "query", "key": "v", "value": "[0-9a-f]{16}" }],
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800, immutable" }]
+    },
+    {
       "source": "/map/world-depth/:file.json.gz",
       "headers": [{ "key": "Content-Type", "value": "application/gzip" }]
     }

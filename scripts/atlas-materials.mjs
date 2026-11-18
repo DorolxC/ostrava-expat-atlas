@@ -63,6 +63,22 @@ mapStyles.overcast = {
   light:{cast:.88,softness:1.75,strength:102,falloff:60,wallSun:.23,wallShade:.26,roofSun:.0048},
 };
 
+// These pigments share the afternoon geometry, canopy and water colors.
+mapStyles['postcard-ochre'] = {
+  ...mapStyles.afternoon, postcard:'ochre', urbanGround:0xcaba9c,
+  paving:0xd1bb9f, plaza:0xede1c8, concrete:0xc3b4a4,
+  shadow:0x49405a, sunlight:0xffe5b0, plasterShade:0x71586e,
+  litGlass:0x5c8580, shadeGlass:0x425d72, window:0x363e4a,
+  light:{...mapStyles.afternoon.light,wallSun:.34,wallShade:.49,roofSun:.0093,strength:158,falloff:94},
+};
+mapStyles['postcard-slate'] = {
+  ...mapStyles.afternoon, postcard:'slate', urbanGround:0xaeadab,
+  paving:0xa3aeb2, plaza:0xcbd6d5, concrete:0xb5bdc2,
+  shadow:0x38495f, sunlight:0xf9ecd0, plasterShade:0x536a80,
+  litGlass:0x60838c, shadeGlass:0x3c5668, window:0x323a51,
+  light:{...mapStyles.afternoon.light,wallSun:.27,wallShade:.54,roofSun:.0064,strength:166,falloff:99},
+};
+
 // Roof and façade pairs by architectural family. Deterministic seed selection
 // gives neighboring houses variety while keeping the district character intact.
 const palettes = {
@@ -287,12 +303,23 @@ export function atlasBuilding(style,family,tags,salt,{small,civic,architecture,p
   } else if (!industrial && (legacy || family==='houses')) {
     wall=mix(wall,0xf5d5a8,.15);
   }
-  if (style==='afternoon') {
+  if (style==='afternoon' || mapStyles[style]?.postcard) {
     if (kind==='clay') roof=mix(roof,industrial?0x944d3b:0xaf5638,.20);
     if (industrial && kind==='steel') roof=mix(roof,0x556975,.24);
     if (family==='poruba') wall=mix(wall,0xf0cc9b,.22);
     if (family==='secession' || family==='town') wall=mix(wall,0xf3d0a6,.12);
     if (family==='estate' || family==='modern') wall=mix(wall,0xc9d0c8,.18);
+  }
+  const postcard=mapStyles[style]?.postcard;
+  if (postcard && !industrial) {
+    const ochre=postcard==='ochre';
+    if (kind==='clay') roof=mix(roof,ochre?0xa6462a:0x755261,.35);
+    else if (kind==='copper') roof=mix(roof,ochre?0x46796d:0x466a7b,.36);
+    else roof=mix(roof,ochre?0x526477:0x4f687f,.30);
+    if (family==='town' || family==='secession') {
+      const historic=ochre?[0xf4d8a1,0xe2af92,0xbfc0a0,0xf2d8bc]:[0xded5c3,0xaeb8c3,0xc2cac4];
+      wall=mix(wall,pick(historic,salt,178),.42);
+    }
   }
   const trim=brick ? 0xcfab89 : architecture ? (legacy ? 0xf5dfb7 : 0xd9d6c2) :
     legacy ? 0xf2dbaf : 0xd5d1b7;
@@ -424,6 +451,7 @@ export function pavingSurface(palette,area,ox,oy,scale) {
   }
   const stone=civic ? palette.plaza : palette.paving;
   const sett=tags.surface==='sett';
+  const postcard=palette.postcard;
   const gap=scale<1.6 ? .18 : .13;
   // Setts become broad bands at city scale. The much smaller joints appear
   // only when the pixels can represent the individual paving blocks.
@@ -437,6 +465,14 @@ export function pavingSurface(palette,area,ox,oy,scale) {
     const shadeStone=noise(Math.floor(row),Math.floor(col),23)-.5;
     const joint=scale>=2.2&&(mod(row,1)<gap||mod(col,1)<.09);
     const course=civic&&(mod(row,18)<.59||mod(col,26)<.42);
+    if (postcard && civic) {
+      const ochre=postcard==='ochre';
+      const cross=mod(row,ochre?17:10);
+      const border=ochre ? cross<.75 || cross>15.9 : mod(col,13)<.8;
+      const tier=ochre && (border || cross>14.7) ? mix(stone,0x9f8171,border?.42:.20) :
+        !ochre && border ? mix(stone,0x758891,.35) : stone;
+      return shade(tier,Math.round(shadeStone*13+(joint?-13:2)));
+    }
     return shade(stone,Math.round(shadeStone*(scale>2.2 ? 10 : 5)+(course ? -15 : joint ? -8 : 1)));
   };
 }

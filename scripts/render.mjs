@@ -5,11 +5,12 @@ import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { project, region, toGeographic } from '../public/js/geo.js';
-import { Raster, png } from './raster.mjs';
+import { Raster, mix, png } from './raster.mjs';
 import { outside, paintSection } from './art.mjs';
 import { coverageField, extent, projectedRings } from './coverage.mjs';
 import { reliefSampler } from './relief.mjs';
 import { loadBlenderModels } from './blender-models.mjs';
+import { digest, shortDigest, foregroundRevision, readSceneAssets } from './scene-integrity.mjs';
 
 const output = new URL('../public/map/',import.meta.url);
 const load = (name) => readFile(new URL(name,output),'utf8').then(JSON.parse);
@@ -19,7 +20,8 @@ const overhang = 205;
 const chunkMeters = 1900;
 const encoder = process.env.OSTRAVA_CWEBP;
 const extension = encoder ? 'webp' : 'png';
-const artStyles = ['atlas', 'foundry', 'daylight', 'lithograph', 'afternoon', 'overcast'];
+const postcardStyles = ['postcard-ochre','postcard-slate'];
+const artStyles = ['atlas', 'foundry', 'daylight', 'lithograph', 'afternoon', 'overcast',...postcardStyles];
 const defaultStyle = 'afternoon';
 const lowLevel = {name:'atlas',scale:2.78,minZoom:0.34};
 
@@ -33,6 +35,20 @@ const highlights = [
   [18.17403,49.82310,910,660,-27],
   [18.29105,49.84295,950,735,-36],
 ];
+const postcardBox=close([18.29242,49.83518,594,358,-5]);
+
+function tintPostcard(raster,detail,scale,ox,oy,box) {
+  const left=Math.max(0,Math.floor(box.left*scale)-ox),top=Math.max(0,Math.floor(box.top*scale)-oy);
+  const right=Math.min(raster.width,Math.ceil(box.right*scale)-ox),bottom=Math.min(raster.height,Math.ceil(box.bottom*scale)-oy);
+  const feather=scale*83;
+  for (let y=top;y<bottom;y++) for (let x=left;x<right;x++) {
+    const wx=x+ox+.5,wy=y+oy+.5;
+    const t=Math.max(0,Math.min(1,(wx-box.left*scale)/feather,(box.right*scale-wx)/feather,
+      (wy-box.top*scale)/feather,(box.bottom*scale-wy)/feather));
+    const at=y*raster.width+x;
+    raster.pixels[at]=mix(raster.pixels[at],detail.pixels[at],t*t*(3-2*t));
+  }
+}
 const pilots = ['centre','ironworks'];
 const plans = [
   ...highlights.map((focus,i)=>({name:'street-'+i,box:close(focus),scale:4.25,minZoom:3.05,pilot:pilots[i]})),
@@ -157,7 +173,7 @@ function edgeAlpha(level,x,y,w,h) {
   };
 }
 
-async function drawLevel(scene,plan,canopies,rows,style,section,targets) {
+async function drawLevel(scene,plan,canopies,rows,style,section,targets,postcard) {
   const {name,scale,minZoom} = plan;
   const data = {...frame(plan.box??scene.coverage.frame,scale),name,minZoom,tiles:[]};
   const step = Math.round(13*scale/1.16);
@@ -188,6 +204,10 @@ async function drawLevel(scene,plan,canopies,rows,style,section,targets) {
         ]);
       });
       const raster = scene.render(scale,gx-padding,gy-padding,w+2*padding,h+2*padding,recordTree,style ? undefined : plan.pilot,style);
+      if (postcard) {
+        const detail=scene.render(scale,gx-padding,gy-padding,w+2*padding,h+2*padding,undefined,undefined,postcard);
+        tintPostcard(raster,detail,scale,gx-padding,gy-padding,postcardBox);
+      }
       if (onlyCanopies) continue;
       const jobs = [];
       if (overview) cropOverview(raster,padding,x,y,w,h,step,overview);
@@ -195,6 +215,8 @@ async function drawLevel(scene,plan,canopies,rows,style,section,targets) {
         for (let tx=0;tx<w;tx+=tileSize) {
           const tw=Math.min(tileSize,w-tx);
           const th=Math.min(tileSize,h-ty);
+          if (postcard && (gx+tx>=postcardBox.right*scale || gx+tx+tw<=postcardBox.left*scale ||
+            gy+ty>=postcardBox.bottom*scale || gy+ty+th<=postcardBox.top*scale)) continue;
           if (!scene.coverage.containsArea((gx+tx)/scale,(gy+ty)/scale,(gx+tx+tw)/scale,(gy+ty+th)/scale)) continue;
           const filename=name+'/'+(x+tx)/tileSize+'-'+(y+ty)/tileSize+'.'+extension;
           data.tiles.push({x:x+tx,y:y+ty,w:tw,h:th,name:filename});
@@ -248,12 +270,34 @@ async function writeCanopies(results) {
   console.log('Recorded '+canopies.length+' painted tree crowns.');
 }
 
-async function writeManifest(manifest) {
-  const digest=createHash('sha256');
+async function writeManifest(manifest,{retainForeground=false,overwriteBrowse=false}={}) {
+  const oldForeground=foregroundRevision(manifest);
+  const artwork=createHash('sha256');
   for (const tile of [manifest,...manifest.closeups].flatMap(level=>level.tiles)) {
-    digest.update(tile.name).update(await readFile(new URL(tile.name,output)));
+    const bytes=await readFile(new URL(tile.name,output));
+    tile.revision=shortDigest(bytes);
+    artwork.update(tile.name).update(bytes);
   }
-  manifest.tileRevision=digest.digest('hex').slice(0,16);
+  if (encoder && overwriteBrowse) {
+    const old=new URL('overview.png',output);
+    const fresh=new URL('overview.webp',output);
+    await new Promise((resolve,reject)=>{
+      const child=spawn(encoder,['-quiet','-q','94','-m','6','-sharp_yuv',fileURLToPath(old),'-o',fileURLToPath(fresh)],
+        {stdio:['ignore','ignore','inherit'],windowsHide:true});
+      child.once('error',reject);
+      child.once('close',code=>code===0?resolve():reject(new Error('Overview encoding failed')));
+    });
+    manifest.overview={name:'overview.webp',revision:shortDigest(await readFile(fresh))};
+  } else if (!manifest.overview || overwriteBrowse) {
+    manifest.overview={name:'overview.png',revision:shortDigest(await readFile(new URL('overview.png',output)))};
+  }
+  manifest.tileRevision=artwork.digest('hex').slice(0,16);
+  manifest.geometryRevision=digest(await readFile(new URL('geometry.json',output)));
+  manifest.occlusionRevision=retainForeground?oldForeground:manifest.tileRevision;
+  manifest.assets ??= {};
+  for (const name of ['motion.json','river-flow.json','canopies.json']) {
+    manifest.assets[name]=shortDigest(await readFile(new URL(name,output)));
+  }
   await writeFile(new URL('scene.json',output),JSON.stringify(manifest));
 }
 
@@ -374,7 +418,32 @@ if (!isMainThread && workerData.depth) {
   const parts=await Promise.all(groups.map(depth=>runWorker({depth,style})));
   const fields=new Map(parts.flat().map(field=>[field.id,field]));
   await writeDepthAssets({fields:routes.regions.map(({id})=>fields.get(id)),geometry:routes.geometry,
-    revision:routes.revision,tileRevision:style===manifest.artStyle?manifest.tileRevision:null},new URL('world-depth.json',output));
+    revision:routes.revision,tileRevision:style===manifest.artStyle?manifest.tileRevision:null,
+    occlusionRevision:style===manifest.artStyle?foregroundRevision(manifest):null},new URL('world-depth.json',output));
+} else if (process.argv.includes('--index-artwork')) {
+  const {manifest}=await readSceneAssets(output,{verifyArtwork:true});
+  await writeManifest(manifest,{retainForeground:true,overwriteBrowse:true});
+} else if (process.argv.includes('--masaryk-postcard')) {
+  const {manifest}=await readSceneAssets(output,{verifyArtwork:true});
+  const style=requestedStyle('postcard-ochre');
+  if (!encoder || manifest.artStyle!=='afternoon' || !postcardStyles.includes(style)) {
+    throw new Error('Masaryk postcard requires afternoon artwork, a postcard style, and OSTRAVA_CWEBP.');
+  }
+  const scene=await loadScene();
+  const {depthField}=await import('./world-depth.mjs');
+  const area=[postcardBox.left,postcardBox.top,postcardBox.right,postcardBox.bottom];
+  if (depthField(scene.render,area,manifest.artStyle).rle!==depthField(scene.render,area,style).rle) {
+    throw new Error('Postcard changes foreground geometry. Render matching depth data before publishing this treatment.');
+  }
+  const levels=[lowLevel,...plans].filter(({box})=>!box || box.left<area[2] && box.top<area[3] && box.right>area[0] && box.bottom>area[1]);
+  let painted=0;
+  for (const plan of levels) {
+    const result=await drawLevel(scene,plan,undefined,undefined,manifest.artStyle,undefined,[{area}],style);
+    painted+=result.tiles.length;
+  }
+  manifest.postcard={style,bounds:area};
+  await writeManifest(manifest,{retainForeground:true});
+  console.log('Painted '+painted+' local tiles. Foreground silhouette is identical at depth-field resolution.');
 } else if (process.argv.includes('--audit-seam')) {
   const at=process.argv.indexOf('--audit-seam');
   const [name,lon,lat,axis='x']=process.argv.slice(at+1,at+5);
@@ -447,7 +516,7 @@ if (!isMainThread && workerData.depth) {
   await pruneTiles(base);
   const closeups=plans.map((plan)=>all.find(({name})=>name===plan.name));
   const manifest={...base,closeups,bounds:root.bounds,city:root.city,background:'#dcdfce',features:root.features,artStyle:style};
-  await writeManifest(manifest);
+  await writeManifest(manifest,{overwriteBrowse:true});
   for (const name of ['detail-0','detail-1','detail-2']) {
     await pruneTiles({name,tiles:[]}).catch(error=>{if (error.code!=='ENOENT') throw error;});
   }

@@ -134,6 +134,7 @@ export function miniatureWall({ design, palette, lit, wall, trim, dark, length, 
   const backing=mix(wall,dark,.39);
   const fascia=mix(wall,trim,.67);
   const weathered=detail && palette.light?.weathered;
+  const postcard=palette.postcard && !courtyard && main && (type==='townhouse'||type==='secession'||type==='civic');
   const corniceCut=weathered && main && ['poruba','townhouse','secession','civic'].includes(type);
   const plaster=weathered && ['poruba','townhouse','secession','plaster','colony','row','detached','panel'].includes(type);
   const shopColor=[0x617e72,0xa2644c,0x6a7c8c,0x977455][Math.floor(noise(salt,246)*4)];
@@ -174,6 +175,14 @@ export function miniatureWall({ design, palette, lit, wall, trim, dark, length, 
       return plinthShadow;
     }
     if (edge<.27) return lit ? fascia : backing;
+    if (postcard && edge<1.05 && v<.96 && (storey<2 || palette.postcard==='slate')) {
+      const course=(elevation/.46)%1;
+      return course<.18 ? backing : course>.76 && lit ? trimLight : fascia;
+    }
+    if (postcard && !groundFloor && v>.84 && v<.92 && ax<.38 &&
+      (type==='secession'||storey===floors-1)) {
+      return v>.89 ? (ax<.14?trimLight:fascia) : backing;
+    }
     if (design.portal && metres>10 && Math.abs(u-.51)<.2 && elevation<17-26*(u-.51)**2) {
       return Math.abs(u-.51)>.176 ? trim : ink;
     }

@@ -4,16 +4,14 @@ import { gunzipSync } from 'node:zlib';
 import assert from 'node:assert/strict';
 import { project, region } from '../public/js/geo.js';
 import { readPbf } from './data/osm-pbf.mjs';
+import { readSceneAssets, foregroundRevision } from './scene-integrity.mjs';
 
 const location=new URL('../public/map/',import.meta.url);
-const [geo,roads,depth,scene]=await Promise.all(['geometry.json','world-routes.json','world-depth.json','scene.json'].map(name=>readFile(new URL(name,location))));
+const {geo,routes,mask,manifest}=await readSceneAssets(location);
 const {features}=JSON.parse(geo);
-const routes=JSON.parse(roads);
-const mask=JSON.parse(depth);
-const manifest=JSON.parse(scene);
 assert.equal(routes.version,1);
 assert.equal(mask.version,2);
-assert.equal(mask.tileRevision,manifest.tileRevision);
+assert.equal(foregroundRevision(mask),foregroundRevision(manifest));
 assert.equal(mask.revision,routes.revision);
 assert.equal(routes.revision,createHash('sha256').update(JSON.stringify(routes.regions)).digest('hex').slice(0,16));
 assert.equal(routes.geometry,createHash('sha256').update(geo).digest('hex'));
@@ -93,7 +91,7 @@ for (const place of routes.regions) {
   assert(field && field.scale>0 && field.width>0 && field.height>0);
   assert.equal(field.file,'world-depth/'+place.id+'.json.gz');
   const cached=JSON.parse(gunzipSync(await readFile(new URL(field.file,location))));
-  assert.equal(cached.tileRevision,manifest.tileRevision);
+  assert.equal(foregroundRevision(cached),foregroundRevision(manifest));
   assert.equal(cached.revision,routes.revision);
   assert.equal(cached.id,place.id);
   const data=Buffer.from(cached.rle,'base64');

@@ -1,6 +1,7 @@
-import { cp, access } from 'node:fs/promises';
+import { cp } from 'node:fs/promises';
+import { readSceneAssets } from './scene-integrity.mjs';
 
 const publicDir = new URL('../public/', import.meta.url);
-await access(new URL('map/scene.json', publicDir));
+await readSceneAssets(new URL('map/',publicDir),{verifyArtwork:true});
 await cp(publicDir, new URL('../dist/', import.meta.url), { recursive: true });
 console.log('Production site written to dist/.');

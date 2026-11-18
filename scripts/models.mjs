@@ -63,7 +63,7 @@ export function modelLandmarks({ map, scale, features, landmarks, screen, boxRin
   const curated = curatedLandmarkStyles.has(style);
   const atlas = curated || style === 'atlas' || style === 'foundry';
   const industrialInk = atlas ? (ironworksPalettes[style === 'lithograph' ? 'foundry' : style]??ironworksPalettes.daylight) : undefined;
-  const shadowCast=style==='afternoon'?1.30:style==='overcast'?.88:1;
+  const shadowCast=style==='afternoon'||style?.startsWith('postcard-')?1.30:style==='overcast'?.88:1;
   const ironworksPilot = atlas || pilot === 'ironworks';
   const centrePilot = atlas || pilot === 'centre';
   const inside = ([x,y]) => x > -113*scale && x < map.width+113*scale
@@ -1213,7 +1213,7 @@ export function modelLandmarks({ map, scale, features, landmarks, screen, boxRin
   }
 
   const modelTools = {
-    map, scale, pitch, parts, detailed, screen, boxRing, rise, flatRoof, slopeFace, average,
+    map, scale, pitch, parts, detailed, style, screen, boxRing, rise, flatRoof, slopeFace, average,
     castShadow, fittingRing, squareSpire, beam, level, route, rim, rails, solid, material,
     box, profile, polar, paintedWall, laid, quad,
   };

@@ -2,7 +2,7 @@ import { shade } from './raster.mjs';
 import { buildRoof, roofLight } from './roof-shapes.mjs';
 import { bridgeDeck, transportGrade } from './transport.mjs';
 
-export const curatedLandmarkStyles = new Set(['daylight', 'lithograph', 'afternoon', 'overcast']);
+export const curatedLandmarkStyles = new Set(['daylight', 'lithograph', 'afternoon', 'overcast', 'postcard-ochre', 'postcard-slate']);
 
 export function curatedLandmarkReplacements(landmarks, style) {
   const buildings = new Set();
@@ -150,13 +150,14 @@ function roofFaces(feature,total,minimum,shape,roofHeight,tools,{color,kind,mans
 
 export function paintOldTownHall(landmark, center, tools) {
   const {parts,pitch,boxRing,average,castShadow,fittingRing,squareSpire,beam,level,rim,solid,material,detailed}=tools;
+  const ochre=tools.style==='postcard-ochre', slate=tools.style==='postcard-slate';
   const body=parts.get(landmark.geometry.body);
   if (!body) return;
   const [wall]=body.rings;
-  const eave = roofFaces(body,15.2,0,'hipped',4.65,tools,{color:0xa95b42,kind:'clay',mansard:true});
+  const eave = roofFaces(body,15.2,0,'hipped',4.65,tools,{color:ochre?0xb15b32:slate?0x875d5c:0xa95b42,kind:'clay',mansard:true});
   castShadow(wall,15.2);
   facade(wall,0,eave,tools,(u,h,lit,width)=>{
-    const stone=lit ? 0xe7c99b : 0xbca076;
+    const stone=lit ? (ochre?0xf3d5a3:slate?0xe2d9c3:0xe7c99b) : (ochre?0xad8b6e:slate?0x9b9a9c:0xbca076);
     const bays=Math.max(1,Math.round(width/3.8));
     const x=((u*bays)%1-.5)*width/bays;
     if (h>eave-1.0 || (h>4.9 && h<5.26)) return shade(stone,h>eave-.24 || h<5.02 ? -21 : 22);
@@ -170,6 +171,10 @@ export function paintOldTownHall(landmark, center, tools) {
       }
     }
     const course=h<5 ? (h+.12)%.87<.13 : (h+.18)%1.48<.10;
+    if (ochre && h<4.95 && Math.abs(x)>.96) {
+      if (Math.abs(x)<1.25) return shade(stone,course?-24:21);
+      if (detailed && h>.97 && h<1.14) return shade(stone,-24);
+    }
     return shade(stone,course ? -12 : u<.09 || u>.93 ? 11 : 0);
   });
   rim(wall,eave+0.04,0xd7b284,.42);
@@ -193,7 +198,7 @@ export function paintOldTownHall(landmark, center, tools) {
   const tower=boxRing(...center,6.85,6.55,angle);
   castShadow(tower,landmark.dimensions.height);
   facade(tower,0,21.25,tools,(u,h,lit,width)=>{
-    const stone=lit ? 0xf2dcb1 : 0xc7ad87;
+    const stone=lit ? (ochre?0xffe3b3:slate?0xf1e4cb:0xf2dcb1) : (ochre?0xbfa07c:slate?0xac9fa0:0xc7ad87);
     const x=(u-.5)*width;
     const dial=clock(x,h,16.65,1.39,lit);
     if (dial!==undefined) return dial;

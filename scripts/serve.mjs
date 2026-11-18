@@ -26,7 +26,8 @@ const mime = {
 
 createServer(async (req, res) => {
   try {
-    const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    const url = new URL(req.url, 'http://localhost');
+    const pathname = decodeURIComponent(url.pathname);
     if (diagnostic && pathname==='/_geometry/network.json') {
       try {
         const { artStyle,tileRevision }=JSON.parse(await readFile(resolve(root,'map','scene.json'),'utf8'));
@@ -53,7 +54,10 @@ createServer(async (req, res) => {
       return;
     }
     const body = await readFile(path);
-    res.writeHead(200, { 'Content-Type': mime[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+    const versionedArtwork=/^\/map\/(overview\.webp|(?:atlas|street-\d+)\/\d+-\d+\.webp)$/.test(pathname) &&
+      /^[0-9a-f]{16}$/.test(url.searchParams.get('v')??'');
+    res.writeHead(200, { 'Content-Type': mime[extname(path)] || 'application/octet-stream',
+      'Cache-Control': versionedArtwork?'public, max-age=604800, immutable':'no-store' });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch {
     res.writeHead(404).end('Not found');

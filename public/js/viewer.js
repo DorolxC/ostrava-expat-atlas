@@ -1,12 +1,14 @@
 import { project, toGeographic, northScreenAngle } from './geo.js';
 import { LIFE_MIN_ZOOM, loadLife } from './life.js';
+import { assetURL } from './asset-url.js';
+import { lifeLOD } from './life-lod.js';
 
 const START = [18.29136,49.83625];
 const MAX_ZOOM = 6.3;
-const TILE_CONCURRENCY = 12;
+const TILE_CONCURRENCY = 8;
 const PREFETCH_CONCURRENCY = 2;
 const TILE_RETRY_DELAYS = [450, 1000, 2200];
-const TILE_TIMEOUT = 8000;
+const TILE_TIMEOUT = 12000;
 const FRAME_INTERVAL = 1000/25;
 const TILE_TRANSITION = 150;
 const clamp = (value,min,max)=>Math.min(max,Math.max(min,value));
@@ -28,11 +30,10 @@ function tileRows(tiles) {
   });
 }
 
-async function loadImage(url, timeout = 0, preferBitmap = false) {
-  const controller=new AbortController();
+async function loadImage(url, timeout = 0, preferBitmap = false, controller=new AbortController(),priority='auto') {
   let timer, image, objectUrl;
   const decoded=(async()=>{
-    const response=await fetch(url,{signal:controller.signal});
+    const response=await fetch(url,{signal:controller.signal,priority});
     if (!response.ok) throw new Error('Map image is unavailable');
     const blob=await response.blob();
     controller.signal.throwIfAborted();
@@ -71,15 +72,11 @@ async function loadImage(url, timeout = 0, preferBitmap = false) {
 
 export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onResize}) {
   const base=new URL('../map/',import.meta.url);
-  const [manifest,overview]=await Promise.all([
-    fetch(new URL('scene.json',base),{cache:'no-cache'}).then((result)=>{
-      if (!result.ok) throw new Error('Map manifest is unavailable');
-      return result.json();
-    }),
-    loadImage(new URL('overview.png',base)),
-  ]);
-  overview.image.alt='';
-  document.querySelector('#inset-picture img')?.replaceWith(overview.image);
+  const manifest=await fetch(new URL('scene.json',base),{cache:'no-cache'}).then(result=>{
+    if (!result.ok) throw new Error('Map manifest is unavailable');
+    return result.json();
+  });
+  let overview,overviewLoading,overviewFailed=0;
   const context=canvas.getContext('2d',{alpha:false});
   if (!context) throw new Error('Map canvas is unavailable');
   const lifeCanvas=document.createElement('canvas');
@@ -108,6 +105,8 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
   let dirty=true;
   let waiting=0;
   let prefetching=0;
+  let cachedBytes=0;
+  let firstTileReady=false;
   let retryTimer;
   let retryDeadline=Infinity;
   let changeTimer;
@@ -116,11 +115,30 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
   let lifeVisible=true;
   let lifeEnabled=false;
   let lifeLoading;
+  let lifeUnavailable=false;
   let lifePainter;
   let lifePainted=false;
   let nextLifeAt=0;
   let lifeTime=0;
   let lastLifePaint;
+  const initialParams=new URL(location.href).searchParams;
+  const probe=initialParams.get('diagnostics')==='1' &&
+    ['localhost','127.0.0.1','[::1]'].includes(location.hostname) ? (window.ostravaDiagnostics={}) : null;
+
+  function loadOverview() {
+    if (overview || overviewLoading || overviewFailed>=2) return;
+    const {name,revision}=manifest.overview??{name:'overview.png'};
+    overviewLoading=loadImage(assetURL(base,name,revision),TILE_TIMEOUT,false,undefined,
+      camera.zoom<levels[0].threshold||!desktop.matches?'high':'low').then(result=>{
+      overview=result;
+      overview.image.alt='';
+      document.querySelector('#inset-picture img')?.replaceWith(overview.image);
+      requestDraw();
+    }).catch(()=>{
+      overviewFailed++;
+      if (overviewFailed<2) setTimeout(requestDraw,650);
+    }).finally(()=>{overviewLoading=null;});
+  }
 
   function cityView() {
     const width=w/(city.right-city.left+1780);
@@ -187,32 +205,86 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
       state.used=now;
       if (state.image || state.pending || !visible || state.retryAt>now) return state.image;
     }
-    if (visible ? waiting-prefetching>=TILE_CONCURRENCY : prefetching>=PREFETCH_CONCURRENCY) return null;
+    const capacity=desktop.matches?TILE_CONCURRENCY:firstTileReady?6:2;
+    if (waiting>=capacity || !visible&&prefetching>=PREFETCH_CONCURRENCY) return null;
     if (!state) {
       state={used:now,image:null,attempts:0,retryAt:0,failed:false,pending:false};
       tiles.set(tile.name,state);
     }
     state.pending=true;
+    const controller=new AbortController();
+    state.controller=controller;
+    state.speculative=!visible;
+    state.cancelled=false;
     state.attempts++;
     waiting++;
     if (!visible) prefetching++;
-    const url=new URL(tile.name,base);
-    if (manifest.tileRevision) url.searchParams.set('v',manifest.tileRevision);
-    loadImage(url,TILE_TIMEOUT,true).then(({image,blob})=>{
+    const url=assetURL(base,tile.name,tile.revision??manifest.tileRevision);
+    loadImage(url,TILE_TIMEOUT,true,controller,visible?'high':'low').then(({image,blob})=>{
       state.image=image;
+      firstTileReady=true;
       state.blob=blob;
+      state.bytes=image.width*image.height*4+blob.size;
+      cachedBytes+=state.bytes;
       state.failed=false;
       state.arrived=performance.now();
     }).catch(()=>{
+      if (state.cancelled) {state.attempts--;return;}
       state.failed=true;
       state.retryAt=performance.now()+(TILE_RETRY_DELAYS[state.attempts-1]??Infinity);
     }).finally(()=>{
       state.pending=false;
+      state.controller=null;
       waiting--;
       if (!visible) prefetching--;
       requestDraw();
     });
     return null;
+  }
+
+  function orderTiles(a,b) {
+    const distance=({x,y,right,bottom})=>{
+      const dx=Math.max(x-w*.5,0,w*.5-right),dy=Math.max(y-h*.5,0,h*.5-bottom);
+      return Math.hypot(dx,dy)+Math.hypot((x+right-w)*.5,(y+bottom-h)*.5)*.22;
+    };
+    return distance(a)-distance(b);
+  }
+
+  function scheduleTiles(groups,now) {
+    const visible=groups.flatMap(({layer,draws})=>layer.active?draws:[]);
+    visible.sort(orderTiles);
+    const wanted=new Set(visible.map(({tile})=>tile.name));
+    const near=new Set(groups.flatMap(({layer})=>layer.active?coverage(layer,camera,86).map(({tile})=>tile.name):[]));
+    const missing=visible.some(({tile})=>!tiles.get(tile.name)?.image && (tiles.get(tile.name)?.retryAt??0)<=now);
+    for (const [name,state] of tiles) {
+      if (!state.pending || state.cancelled || wanted.has(name)) continue;
+      if (!near.has(name)&&(movement || pointers.size || state.speculative) || missing&&state.speculative) {
+        state.cancelled=true;
+        state.controller.abort();
+      }
+    }
+    for (const {tile} of visible) tileImage(tile,now,true);
+    if (!missing) {
+      const destination=movement?.to??camera;
+      for (const layer of levels) {
+        if (prefetching>=PREFETCH_CONCURRENCY || destination.zoom<layer.threshold*.89) break;
+        for (const {tile} of coverage(layer,destination,42).sort(orderTiles)) {
+          if (prefetching>=PREFETCH_CONCURRENCY) break;
+          if (!wanted.has(tile.name)) tileImage(tile,now,false);
+        }
+      }
+    }
+    const budget=(desktop.matches?110:64)*1024*1024;
+    if (cachedBytes>budget || tiles.size>96) {
+      const stale=[...tiles].filter(([name,state])=>!near.has(name)&&!state.pending).sort((a,b)=>a[1].used-b[1].used);
+      for (const [name,state] of stale) {
+        if (cachedBytes<=budget && tiles.size<=96) break;
+        state.image?.close?.();
+        cachedBytes-=state.bytes??0;
+        tiles.delete(name);
+      }
+    }
+    if(probe) Object.assign(probe,{tileRequests:waiting,tileCacheBytes:cachedBytes,lod:lifeLOD(camera.zoom)});
   }
 
   function scheduleRetry(at) {
@@ -270,68 +342,53 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
     context.fillStyle=background;
     context.fillRect(0,0,w,h);
     context.imageSmoothingEnabled=camera.zoom<.16;
-    context.drawImage(overview.image,...overviewRect);
+    if (overview) context.drawImage(overview.image,...overviewRect);
     tileBlending=false;
     const resting=!movement && !pointers.size;
-    const painted=resting ? [{id:'overview',blob:overview.blob,rect:overviewRect,smooth:context.imageSmoothingEnabled}] : null;
+    const painted=resting ? (overview ? [{id:'overview',blob:overview.blob,rect:overviewRect,smooth:context.imageSmoothingEnabled}] : []) : null;
     let settled=true;
+    let hasArtwork=!!overview;
     let retryAt=Infinity;
     const snap=(value)=>Math.round(value*dpr)/dpr;
+    const groups=[];
     for (const layer of levels) {
       const hysteresis=layer.threshold*.065;
       layer.active=camera.zoom>=(layer.active ? layer.threshold-hysteresis : layer.threshold);
       if (!layer.active && !layer.opacity) continue;
-      const visible=coverage(layer,camera);
-      const draws=visible.map((entry)=>({
-        ...entry,image:layer.active ? tileImage(entry.tile,now,true) : tiles.get(entry.tile.name)?.image,
-      }));
-      for (const {tile,image} of draws) {
-        if (!layer.active || image) continue;
+      groups.push({layer,draws:coverage(layer,camera)});
+    }
+    loadOverview();
+    scheduleTiles(groups,now);
+    for (const {layer,draws} of groups) {
+      for (const {tile} of draws) {
+        if (!layer.active) continue;
         const state=tiles.get(tile.name);
+        if (state?.image) continue;
         if (!state?.failed) settled=false;
         if (state?.failed && !state.pending && state.retryAt>now) retryAt=Math.min(retryAt,state.retryAt);
       }
-      // Commit a new level only after its visible tiles are decoded. The
-      // lower level stays painted underneath throughout the fade.
-      const ready=draws.length>0 && draws.every(({image,tile})=>image || tiles.get(tile.name)?.failed);
-      fade(layer,layer.active && visible.length && (ready || layer.opacity>0) ? 1 : 0,now);
+      // Each arrived tile fades over the lower artwork independently.
+      fade(layer,layer.active && draws.length ? 1 : 0,now);
       if (layer.opacity<=0) continue;
       context.imageSmoothingEnabled=camera.zoom*dpr/layer.scale < .72;
-      for (const {tile,image,x,y,right,bottom} of draws) {
+      for (const {tile,x,y,right,bottom} of draws) {
+        const state=tiles.get(tile.name),image=state?.image;
         if (!image) continue;
-        const arrival=tiles.get(tile.name)?.arrived ?? now;
-        const arrivalAlpha=reduced.matches || layer.transition ? 1 : clamp((now-arrival)/120,0,1);
+        hasArtwork=true;
+        const arrivalAlpha=reduced.matches ? 1 : clamp((now-state.arrived)/115,0,1);
         if (arrivalAlpha<1) tileBlending=true;
         context.globalAlpha=layer.opacity*easing(arrivalAlpha);
         const rect=[snap(x),snap(y),snap(right)-snap(x),snap(bottom)-snap(y)];
         context.drawImage(image,...rect);
-        painted?.push({id:tile.name,blob:tiles.get(tile.name).blob,rect,smooth:context.imageSmoothingEnabled});
+        painted?.push({id:tile.name+':'+(tile.revision??''),blob:state.blob,rect,smooth:context.imageSmoothingEnabled});
       }
     }
     context.globalAlpha=1;
     scheduleRetry(retryAt);
-    const destination=movement?.to??camera;
-    for (const layer of levels) {
-      if (prefetching>=PREFETCH_CONCURRENCY || destination.zoom<layer.threshold*.89) break;
-      const candidates=coverage(layer,destination,42);
-      for (const {tile} of candidates) {
-        if (prefetching>=PREFETCH_CONCURRENCY) break;
-        tileImage(tile,now,false);
-      }
+    if (painted?.length && settled && !tileBlending && !levels.some((level)=>level.transition)) {
+      return {hasArtwork,scene:{key:[w,h,dpr,camera.x,camera.y,camera.zoom,...painted.map(({id})=>id)].join(','), painted, background}};
     }
-    const tileLimit=desktop.matches ? 64 : 36;
-    if (tiles.size>tileLimit) {
-      for (const [key,value] of tiles) {
-        if (tiles.size<=tileLimit) break;
-        if (now-value.used>1600 && !value.pending) {
-          value.image?.close?.();
-          tiles.delete(key);
-        }
-      }
-    }
-    if (painted && settled && !tileBlending && !levels.some((level)=>level.transition)) {
-      return {key:[w,h,dpr,camera.x,camera.y,camera.zoom,...painted.map(({id})=>id)].join(','), painted, background};
-    }
+    return {hasArtwork,unavailable:!hasArtwork && overviewFailed>=2 && waiting===0};
   }
 
   function advance(now) {
@@ -369,14 +426,14 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
     let cameraChanged=false;
     if (dirty || tileBlending || levels.some((level)=>level.transition)) {
       dirty=false;
-      const scene=drawScenery(now);
+      const {scene,hasArtwork,unavailable}=drawScenery(now);
       const origin=pointOnScreen([0,0]);
       cameraChanged=!frameState || w!==frameState.width || h!==frameState.height || dpr!==frameState.dpr ||
         camera.zoom!==frameState.zoom || origin[0]!==frameState.origin[0] || origin[1]!==frameState.origin[1];
       frameState={
         width:w,height:h,dpr,zoom:camera.zoom,origin,pointOnScreen,center:toGeographic(camera.x,camera.y),
         coverage:[city.left,city.top,city.right,city.bottom],
-        mapCanvas:canvas,scene,
+        mapCanvas:canvas,scene,hasArtwork,unavailable,
         inset:{
           left:(camera.x-w/(2*camera.zoom)-manifest.ox/manifest.scale)*manifest.scale/manifest.width,
           top:(camera.y-h/(2*camera.zoom)-manifest.oy/manifest.scale)*manifest.scale/manifest.height,
@@ -387,12 +444,15 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
         canZoomIn:camera.zoom<MAX_ZOOM-.002,canZoomOut:camera.zoom>minZoom()+.002,
       };
       onFrame?.(frameState);
+      if (scene && lifeEnabled && camera.zoom>=LIFE_MIN_ZOOM) ensureLife();
     }
     if (!ambientReady()) {
+      if (probe) probe.motion=!lifeEnabled?'paused or reduced motion':camera.zoom<LIFE_MIN_ZOOM?'overview zoom':lifeUnavailable?'environment unavailable':'artwork, environment, or visibility pending';
       clearLife();
       nextLifeAt=0;
       lastLifePaint=undefined;
     } else if (cameraChanged || now>=nextLifeAt) {
+      if (probe) probe.motion='active';
       clearLife();
       try {
         if (lastLifePaint!==undefined) lifeTime+=Math.min(110,now-lastLifePaint);
@@ -418,22 +478,24 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
       lastLifePaint=undefined;
       return;
     }
+    requestFrame();
+    if (frameState?.scene && camera.zoom>=LIFE_MIN_ZOOM) ensureLife();
+  }
+
+  function ensureLife() {
     if (!lifeContext) {
       onLifeState?.('unavailable');
       return;
     }
-    if (lifePainter) {
-      onLifeState?.('ready');
-      requestFrame();
-      return;
-    }
-    if (lifeLoading) return;
+    if (lifePainter) return;
+    if (lifeLoading || lifeUnavailable) return;
     onLifeState?.('loading');
-    lifeLoading=loadLife(base,manifest.tileRevision).then((painter)=>{
+    lifeLoading=loadLife(base,manifest,probe).then((painter)=>{
       lifePainter=painter;
       onLifeState?.('ready');
       requestFrame();
     }).catch((error)=>{
+      lifeUnavailable=true;
       onLifeState?.('unavailable');
       console.warn('Ambient movement is unavailable.',error);
     }).finally(()=>{ lifeLoading=undefined; });
@@ -621,6 +683,7 @@ export async function setupViewer(canvas,input,{onFrame,onChange,onLifeState,onR
   document.getElementById('compass-arrow').style.transform='rotate('+northScreenAngle+'deg)';
   resize();
   camera=home();
+  loadView(initialParams.get('view'));
   requestDraw();
   return {requestDraw,zoomBy,fit,reset,wholeCity,goToDistrict,goFromInset,select,revealPlace,view,loadView,travelToView,setLife};
 }

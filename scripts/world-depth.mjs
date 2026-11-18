@@ -29,17 +29,17 @@ export function depthField(draw, bounds, style) {
   return {x,y,width,height,scale,rle:Buffer.from(runs).toString('base64')};
 }
 
-export async function writeDepthAssets({fields,geometry,tileRevision,revision},destination) {
+export async function writeDepthAssets({fields,geometry,tileRevision,occlusionRevision,revision},destination) {
   await mkdir(new URL('world-depth/',destination),{recursive:true});
   let bytes=0;
   const index=[];
   for (const {rle,...field} of fields) {
     const file='world-depth/'+field.id+'.json.gz';
-    const pack=gzipSync(JSON.stringify({id:field.id,tileRevision,revision,rle}),{level:6});
+    const pack=gzipSync(JSON.stringify({id:field.id,tileRevision,occlusionRevision,revision,rle}),{level:6});
     await writeFile(new URL(file,destination),pack);
     index.push({...field,file});
     bytes+=pack.length;
   }
-  await writeFile(destination,JSON.stringify({version:2,tileRevision,revision,geometry,fields:index}));
+  await writeFile(destination,JSON.stringify({version:2,tileRevision,occlusionRevision,revision,geometry,fields:index}));
   console.log('Prepared foreground depth for '+fields.length+' areas ('+bytes+' bytes).');
 }

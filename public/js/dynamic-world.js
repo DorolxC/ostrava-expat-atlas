@@ -1,6 +1,8 @@
 import { region } from './geo.js';
 import { createAmbientWorld } from './ambient-world.js';
 import { actorBounds, createActorPainter } from './world-sprites.js';
+import { assetURL } from './asset-url.js';
+import { STREET_LIFE_ZOOM } from './life-lod.js';
 
 const lift=Math.sqrt(1-region.pitch**2);
 const limits={walker:{speed:1.34,turn:1.7,fade:1.2},car:{speed:8.4,turn:5.6,fade:1.1},cycle:{speed:3.9,turn:2.9,fade:1.1}};
@@ -119,9 +121,7 @@ function clipActor(context,actor,field,frame) {
 }
 
 async function json(base,file,revision) {
-  const url=new URL(file,base);
-  url.searchParams.set('v',revision);
-  const response=await fetch(url);
+  const response=await fetch(assetURL(base,file,revision));
   if (!response.ok) throw new Error(file+' is unavailable');
   if (file.endsWith('.gz')) {
     if (!response.body || typeof DecompressionStream!=='function') throw new Error('Compressed occlusion data is unavailable in this browser');
@@ -130,14 +130,21 @@ async function json(base,file,revision) {
   return response.json();
 }
 
-export async function loadDynamicWorld(base,revision) {
+export async function loadDynamicWorld(base,manifest,probe) {
+  const revision=manifest.occlusionRevision??manifest.tileRevision;
   const [routes,scenery]=await Promise.all([json(base,'world-routes.json',revision),json(base,'world-depth.json',revision)]);
+  const occlusion=scenery.occlusionRevision??scenery.tileRevision;
+  if (probe) Object.assign(probe.world,{artwork:manifest.tileRevision,geometry:routes.geometry,expectedGeometry:manifest.geometryRevision,
+    occlusion,expectedOcclusion:revision,routes:routes.revision,expectedRoutes:scenery.revision});
   if (routes.version!==1 || scenery.version!==2 || scenery.geometry!==routes.geometry ||
-    scenery.tileRevision!==revision || scenery.revision!==routes.revision) {
-    throw new Error('City life data belongs to a different tile revision');
+    (manifest.geometryRevision && routes.geometry!==manifest.geometryRevision) ||
+    occlusion!==revision || scenery.revision!==routes.revision) {
+    throw new Error('World routes or foreground masks belong to a different scene. Rebuild the dependent world assets.');
   }
   const fields=new Map(scenery.fields.map(field=>[field.id,field]));
   const locations=routes.regions.filter(area=>fields.has(area.id)).map(area=>({...area,field:fields.get(area.id)}));
+  if (locations.length!==routes.regions.length || fields.size!==locations.length) throw new Error('Activity regions and depth fields differ');
+  if (probe) Object.assign(probe.world,{state:'ready',compatible:true,activityRegions:locations.length});
   const atmosphere=createAmbientWorld();
   const paintActor=createActorPainter();
   const before=[0,0],after=[0,0],position=[0,0];
@@ -162,8 +169,8 @@ export async function loadDynamicWorld(base,revision) {
     if (loading>=concurrentFields || field.pending || (field.failures??0)>=2 || now<(field.retryAt??0)) return;
     field.pending=true;
     loading++;
-    json(base,field.file,routes.revision??revision).then(({id,tileRevision,revision:activityRevision,rle})=>{
-      if (id!==field.id || tileRevision!==revision || activityRevision!==routes.revision) throw new Error('Foreground depth belongs to a different scene');
+    json(base,field.file,revision+'-'+routes.revision).then(({id,tileRevision,occlusionRevision,revision:activityRevision,rle})=>{
+      if (id!==field.id || (occlusionRevision??tileRevision)!==revision || activityRevision!==routes.revision) throw new Error('Foreground depth belongs to a different scene');
       field.depth=decodeField(field,rle);
       resident.set(field.id,field);
       if (resident.size>residentFieldLimit) {
@@ -199,13 +206,18 @@ export async function loadDynamicWorld(base,revision) {
       const priority=({anchor:[ax,ay]})=>(ax-x)**2+(ay-y)**2;
       areas=locations.filter(({bounds})=>overlaps(bounds,box)).sort((a,b)=>priority(a)-priority(b)).slice(0,visibleFieldLimit);
     }
-    if (frame.scene && frame.zoom>=.82) {
+    const showStreet=frame.scene && frame.zoom>=STREET_LIFE_ZOOM;
+    if (showStreet) {
       const now=performance.now();
       for (const {field} of areas) prepare(field,now);
     }
     // Atmospheric shade also belongs to the atlas grid between activity areas.
-    atmosphere(context,frame,seconds,areas,areas.some(({field})=>field.depth) ? crowns() : [],visibility);
-    if (frame.zoom<.90 || !areas.length) {
+    const hasDepth=showStreet && areas.some(({field})=>field.depth);
+    const ambient=atmosphere(context,frame,seconds,showStreet ? areas : [],hasDepth ? crowns() : [],visibility,probe);
+    const painted=probe ? {walker:0,car:0,cycle:0} : undefined;
+    if (probe) Object.assign(probe.world,{visibleRegions:areas.length,loadedDepthFields:resident.size,pendingDepthFields:loading,actors:painted,...ambient,
+      suppressed:!showStreet?'street zoom or artwork pending':!areas.length?'no mapped activity region in view':!hasDepth?'foreground depth pending or unavailable':null});
+    if (!hasDepth) {
       for (const tram of trams) paintTram(context,frame,tram);
       return;
     }
@@ -235,7 +247,7 @@ export async function loadDynamicWorld(base,revision) {
         actor.heading=Math.atan2((after[1]-before[1])/region.pitch,after[0]-before[0]);
         actor.phase=at*(kind==='walker'?5.65:kind==='cycle'?2.9:3.4);
         actor.opacity=ease(Math.min(stage,duration-stage)/limits[kind].fade);
-        actor.zoom=frame.zoom*(kind==='walker'?1.18:kind==='cycle'?1.09:1);
+        actor.zoom=frame.zoom*(kind==='walker'?1.39:kind==='cycle'?1.23:1.08);
         visible.push(actor);
       }
     }
@@ -245,7 +257,10 @@ export async function loadDynamicWorld(base,revision) {
       while (nextTram<trams.length && trams[nextTram].position[1]<=actor.wy) paintTram(context,frame,trams[nextTram++]);
       context.save();
       context.globalAlpha=actor.opacity;
-      if (clipActor(context,actor,actor.field,frame)) paintActor(context,actor);
+      if (clipActor(context,actor,actor.field,frame)) {
+        paintActor(context,actor);
+        if (painted) painted[actor.kind]++;
+      }
       context.restore();
     }
     while (nextTram<trams.length) paintTram(context,frame,trams[nextTram++]);
